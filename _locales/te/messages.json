@@ -1,0 +1,14 @@
+{
+  "appName": {
+    "message": "AI వెబ్‌సైట్ అనువాదకుడు",
+    "description": "Extension name (max 45 chars)"
+  },
+  "appDescription": {
+    "message": "AI API (Gemini, OpenAI, Anthropic) తో ఏదైనా వెబ్‌పేజీని అనువదించండి. 20+ భాషలకు మద్దతు ఉంది.",
+    "description": "Extension description (max 132 chars)"
+  },
+  "contextMenuToggle": {
+    "message": "అనువాదాన్ని ఆన్/ఆఫ్ చేయండి",
+    "description": "Context menu item to toggle translation"
+  }
+}

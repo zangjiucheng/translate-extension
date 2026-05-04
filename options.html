@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="utf-8">
+  <meta name="color-scheme" content="light dark">
+  <title>AI Website Translator</title>
+  <link rel="stylesheet" href="options.css">
+</head>
+
+<body>
+  <div class="container">
+    <h1 id="header" data-i18n="pageHeader">AI Website Translator</h1>
+    <p class="app-subtitle" data-i18n="pageSubtitle">Settings for AI-powered page translation</p>
+
+    <section class="settings-section">
+      <div class="section-header">
+        <div class="section-header-text">
+          <h2 data-i18n="targetLangSection">Language</h2>
+          <span class="section-desc" data-i18n="targetLangDesc">Language to translate pages into</span>
+        </div>
+        <button class="btn-reset" type="button" data-reset="language" data-i18n="resetBtn">Reset</button>
+      </div>
+      <div class="settings-card">
+        <div class="form-group">
+          <label for="targetLanguage" data-i18n="targetLangLabel">Target language</label>
+          <select id="targetLanguage"><!-- populated by JS --></select>
+        </div>
+      </div>
+    </section>
+
+    <section class="settings-section">
+      <div class="section-header">
+        <div class="section-header-text">
+          <h2 data-i18n="apiSection">API</h2>
+          <span class="section-desc" data-i18n="apiDesc">AI connection settings</span>
+        </div>
+        <button class="btn-reset" type="button" data-reset="api" data-i18n="resetBtn">Reset</button>
+      </div>
+      <div class="settings-card">
+        <div class="form-group">
+          <label for="apiProvider" data-i18n="providerLabel">Provider</label>
+          <select id="apiProvider">
+            <option value="gemini">Google (Gemini)</option>
+            <option value="openai">OpenAI (ChatGPT)</option>
+            <option value="anthropic">Anthropic (Claude)</option>
+            <option value="openai-compatible">OpenAI Compatible</option>
+          </select>
+        </div>
+        <div class="form-group" id="endpointGroup" style="display:none">
+          <label for="endpointUrl" data-i18n="endpointLabel">Endpoint URL</label>
+          <input type="text" id="endpointUrl" placeholder="https://api.example.com/v1/chat/completions" autocomplete="off" spellcheck="false">
+        </div>
+        <div class="form-group">
+          <label for="apiKey" data-i18n="apiKeyLabel">API Key</label>
+          <input type="password" id="apiKey" placeholder="" autocomplete="off" spellcheck="false">
+        </div>
+        <div class="form-group">
+          <label for="aiModel" data-i18n="aiModelLabel">AI Model</label>
+          <input type="text" id="aiModel" placeholder="" autocomplete="off" spellcheck="false">
+        </div>
+      </div>
+    </section>
+
+    <section class="settings-section">
+      <div class="section-header">
+        <div class="section-header-text">
+          <h2 data-i18n="batchSection">Output</h2>
+          <span class="section-desc" data-i18n="batchDesc">Max tokens the AI can output per request</span>
+        </div>
+        <button class="btn-reset" type="button" data-reset="output" data-i18n="resetBtn">Reset</button>
+      </div>
+      <div class="settings-card">
+        <div class="form-group">
+          <label for="maxToken" data-i18n="maxTokenLabel">Max output tokens</label>
+          <input type="number" id="maxToken" min="1" max="1000000" placeholder="65536">
+        </div>
+      </div>
+    </section>
+
+    <section class="settings-section">
+      <div class="section-header">
+        <div class="section-header-text">
+          <h2 data-i18n="networkSection">Network</h2>
+          <span class="section-desc" data-i18n="networkDesc">Concurrency and retries</span>
+        </div>
+        <button class="btn-reset" type="button" data-reset="network" data-i18n="resetBtn">Reset</button>
+      </div>
+      <div class="settings-card">
+        <div class="form-group">
+          <label for="delayBetweenRequests" data-i18n="delayLabel">Delay between requests (s)</label>
+          <input type="number" id="delayBetweenRequests" min="0" max="3600" placeholder="10">
+        </div>
+        <div class="form-group">
+          <label for="concurrencyLimit" data-i18n="concurrencyLabel">Concurrency limit</label>
+          <input type="number" id="concurrencyLimit" min="1" max="50" placeholder="10">
+        </div>
+        <div class="form-group">
+          <label for="maxRetries" data-i18n="maxRetriesLabel">Max retries on error</label>
+          <input type="number" id="maxRetries" min="0" max="10" placeholder="3">
+        </div>
+        <div class="form-group">
+          <label for="timeout" data-i18n="timeoutLabel">API timeout (seconds)</label>
+          <input type="number" id="timeout" min="1" max="600" placeholder="180">
+        </div>
+      </div>
+    </section>
+
+    <section class="settings-section">
+      <div class="section-header">
+        <div class="section-header-text">
+          <h2 data-i18n="displaySection">Display & Behavior</h2>
+        </div>
+        <button class="btn-reset" type="button" data-reset="display" data-i18n="resetBtn">Reset</button>
+      </div>
+      <div class="settings-card">
+        <label class="toggle-group" for="toggleBlueBackground">
+          <span data-i18n="showHighlightLabel">Show translation highlight</span>
+          <input type="checkbox" id="toggleBlueBackground">
+          <span class="toggle-switch" aria-hidden="true"></span>
+        </label>
+        <label class="toggle-group" for="realTimeTranslation">
+          <span data-i18n="autoTranslateLabel">Auto translate</span>
+          <input type="checkbox" id="realTimeTranslation">
+          <span class="toggle-switch" aria-hidden="true"></span>
+        </label>
+        <label class="toggle-group" for="showProgressPopup">
+          <span data-i18n="showProgressLabel">Show progress popup</span>
+          <input type="checkbox" id="showProgressPopup">
+          <span class="toggle-switch" aria-hidden="true"></span>
+        </label>
+        <label class="toggle-group" for="hidePromptAllSites">
+          <span data-i18n="hidePromptLabel">Never ask before translating</span>
+          <input type="checkbox" id="hidePromptAllSites">
+          <span class="toggle-switch" aria-hidden="true"></span>
+        </label>
+      </div>
+    </section>
+
+    <section class="settings-section">
+      <div class="section-header">
+        <div class="section-header-text">
+          <h2 data-i18n="excludeSection">Excluded Sites</h2>
+          <span class="section-desc" data-i18n="excludeDesc">URLs to skip auto-translation (one per line)</span>
+        </div>
+        <button class="btn-reset" type="button" data-reset="exclude" data-i18n="resetBtn">Reset</button>
+      </div>
+      <div class="settings-card">
+        <div class="form-group">
+          <label for="excludeList" data-i18n="excludeListLabel">Sites to exclude</label>
+          <textarea id="excludeList" rows="5" placeholder="https://example.com&#10;https://www.example.org" spellcheck="false"></textarea>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <div class="save-bar">
+    <button id="saveBtn" type="button">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path>
+        <polyline points="17 21 17 13 7 13 7 21"></polyline>
+        <polyline points="7 3 7 8 15 8"></polyline>
+      </svg>
+      <span data-i18n="saveBtn">Save settings</span>
+    </button>
+    <div id="status" role="status" aria-live="polite"></div>
+  </div>
+
+  <script src="translations.js"></script>
+  <script src="options.js"></script>
+</body>
+
+</html>

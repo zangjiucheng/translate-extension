@@ -1,0 +1,14 @@
+{
+  "appName": {
+    "message": "AI वेबसाइट अनुवादक",
+    "description": "Extension name (max 45 chars)"
+  },
+  "appDescription": {
+    "message": "AI API (Gemini, OpenAI, Anthropic) से किसी भी वेबपेज का अनुवाद करें। 20+ भाषाओं में समर्थन।",
+    "description": "Extension description (max 132 chars)"
+  },
+  "contextMenuToggle": {
+    "message": "अनुवाद टॉगल करें",
+    "description": "Context menu item to toggle translation"
+  }
+}

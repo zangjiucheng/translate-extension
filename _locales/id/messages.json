@@ -1,0 +1,14 @@
+{
+  "appName": {
+    "message": "AI Penerjemah Web",
+    "description": "Extension name (max 45 chars)"
+  },
+  "appDescription": {
+    "message": "Terjemahkan halaman web apa pun dengan AI API (Gemini, OpenAI, Anthropic, kompatibel OpenAI). Mendukung 20+ bahasa.",
+    "description": "Extension description (max 132 chars)"
+  },
+  "contextMenuToggle": {
+    "message": "Aktifkan/nonaktifkan terjemahan",
+    "description": "Context menu item to toggle translation"
+  }
+}

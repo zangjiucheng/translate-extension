@@ -1,0 +1,14 @@
+{
+  "appName": {
+    "message": "AI 網頁翻譯",
+    "description": "Extension name (max 45 chars)"
+  },
+  "appDescription": {
+    "message": "使用 AI API（Gemini、OpenAI、Anthropic 等）翻譯任意網頁，支援繁簡中文等 20 餘種語言。",
+    "description": "Extension description (max 132 chars)"
+  },
+  "contextMenuToggle": {
+    "message": "切換翻譯",
+    "description": "Context menu item to toggle translation"
+  }
+}
