@@ -592,7 +592,7 @@
                 const parent = mutation.target.parentElement;
                 if (parent && !isFullyExcluded(parent) && isTranslatableText(mutation.target.textContent)) {
                     const block = findBlockAncestor(parent);
-                    if (block && block.dataset?.translationStatus !== 'translated' && block.dataset?.translationStatus !== 'processing') {
+                    if (block && block.dataset?.translationStatus !== 'translated' && block.dataset?.translationStatus !== 'processing' && block.dataset?.translationStatus !== 'original') {
                         hasRelevantChange = true;
                     }
                 }
@@ -986,6 +986,7 @@
                     acceptNode: (node) => {
                         if (!node || !(node instanceof Element)) return NodeFilter.FILTER_REJECT;
                         if (node.dataset?.translationStatus === 'translated') return NodeFilter.FILTER_REJECT;
+                        if (node.dataset?.translationStatus === 'original') return NodeFilter.FILTER_REJECT;
                         if (node.dataset?.translationWrapper === 'true') return NodeFilter.FILTER_REJECT;
                         if (isFullyExcluded(node)) return NodeFilter.FILTER_REJECT;
                         if (node.shadowRoot) queue.push(node.shadowRoot);
@@ -1001,6 +1002,7 @@
                 if (!block || !block.isConnected) continue;
                 if (block.dataset?.translationStatus === 'translated') continue;
                 if (block.dataset?.translationStatus === 'processing') continue;
+                if (block.dataset?.translationStatus === 'original') continue;
                 const tu = buildTU(block);
                 if (tu && tu.hasTranslatableText) {
                     tu.id = `tu_${tuIdCounter++}`;
@@ -1149,6 +1151,13 @@
 
             tu.block.dataset.translatedHtml = tu.block.innerHTML;
             tu.block.dataset.translationStatus = 'translated';
+            let ancestor = tu.block.parentElement;
+            while (ancestor && ancestor !== document.documentElement) {
+                if ('translatedHtml' in ancestor.dataset) {
+                    ancestor.dataset.translatedHtml = ancestor.innerHTML;
+                }
+                ancestor = ancestor.parentElement;
+            }
             try {
                 chrome.storage.local.get(['toggleBlueBackground'], (items) => {
                     if (items.toggleBlueBackground) {
@@ -1244,6 +1253,7 @@
 
     function toggleAllTranslations() {
         if (isTranslating) return;
+        clearTimeout(observerDebounceTimer);
         disconnectAllObservers();
         try {
             const blocks = Array.from(document.querySelectorAll(
