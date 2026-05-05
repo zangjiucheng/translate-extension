@@ -83,7 +83,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             'compatibleApiKey', 'compatibleModel', 'compatibleEndpoint',
             'delayBetweenRequests', 'maxToken', 'concurrencyLimit',
             'maxRetries', 'timeout',
-            'toggleBlueBackground', 'realTimeTranslation', 'showProgressPopup', 'excludeList', 'hidePromptAllSites'
+            'toggleBlueBackground', 'realTimeTranslation', 'showProgressPopup', 'excludeList', 'hidePromptAllSites', 'showContextMenu'
         ]);
 
         const lang = items.targetLanguage || 'en';
@@ -113,6 +113,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         document.getElementById('realTimeTranslation').checked = items.realTimeTranslation === true;
         document.getElementById('showProgressPopup').checked = items.showProgressPopup !== false;
         document.getElementById('hidePromptAllSites').checked = items.hidePromptAllSites === true;
+        document.getElementById('showContextMenu').checked = items.showContextMenu !== false;
         document.getElementById('excludeList').value = (items.excludeList && Array.isArray(items.excludeList)) ? items.excludeList.join('\n') : '';
     } catch (error) {
         console.error('Error loading settings:', error);
@@ -149,6 +150,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             document.getElementById('realTimeTranslation').checked = false;
             document.getElementById('showProgressPopup').checked = true;
             document.getElementById('hidePromptAllSites').checked = false;
+            document.getElementById('showContextMenu').checked = true;
         },
         exclude: () => {
             document.getElementById('excludeList').value = '';
@@ -189,6 +191,7 @@ document.getElementById('saveBtn').addEventListener('click', async () => {
     const realTimeTranslation = document.getElementById('realTimeTranslation').checked;
     const showProgressPopup = document.getElementById('showProgressPopup').checked;
     const hidePromptAllSites = document.getElementById('hidePromptAllSites').checked;
+    const showContextMenu = document.getElementById('showContextMenu').checked;
     const excludeList = document.getElementById('excludeList').value.split(/\r?\n/).map(url => url.trim()).filter(url => url);
 
     const saveData = {
@@ -205,7 +208,7 @@ document.getElementById('saveBtn').addEventListener('click', async () => {
         compatibleEndpoint: providerSettings['openai-compatible'].endpoint.trim(),
         delayBetweenRequests, maxToken,
         concurrencyLimit, maxRetries, timeout,
-        toggleBlueBackground, realTimeTranslation, showProgressPopup, hidePromptAllSites, excludeList
+        toggleBlueBackground, realTimeTranslation, showProgressPopup, hidePromptAllSites, showContextMenu, excludeList
     };
 
     try {
