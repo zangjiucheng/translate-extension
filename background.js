@@ -72,7 +72,7 @@ chrome.runtime.onInstalled.addListener(function (details) {
     }
     chrome.storage.local.get(
         ['apiProvider', 'targetLanguage', 'geminiModel', 'openaiModel', 'anthropicModel', 'compatibleModel',
-         'batchSize', 'maxBatchLength', 'delayBetweenRequests', 'maxToken', 'concurrencyLimit', 'maxRetries', 'timeout'],
+         'batchSize', 'maxBatchLength', 'delayBetweenRequests', 'maxToken', 'concurrencyLimit', 'maxRetries', 'timeout', 'showContextMenu'],
         function (items) {
             const toSet = {};
             if (!items.apiProvider) toSet.apiProvider = DEFAULTS.apiProvider;
@@ -87,16 +87,18 @@ chrome.runtime.onInstalled.addListener(function (details) {
             if (items.concurrencyLimit === undefined) toSet.concurrencyLimit = DEFAULTS.concurrencyLimit;
             if (items.maxRetries === undefined) toSet.maxRetries = DEFAULTS.maxRetries;
             if (items.timeout === undefined) toSet.timeout = DEFAULTS.timeout;
+            if (items.showContextMenu === undefined) toSet.showContextMenu = true;
             if (Object.keys(toSet).length > 0) chrome.storage.local.set(toSet);
+            chrome.contextMenus.removeAll(() => {
+                chrome.contextMenus.create({
+                    id: "toggleTranslation",
+                    title: chrome.i18n.getMessage('contextMenuToggle'),
+                    contexts: ["all"],
+                    visible: items.showContextMenu !== false
+                });
+            });
         }
     );
-    chrome.contextMenus.removeAll(() => {
-        chrome.contextMenus.create({
-            id: "toggleTranslation",
-            title: chrome.i18n.getMessage('contextMenuToggle'),
-            contexts: ["all"]
-        });
-    });
 });
 
 chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
@@ -146,6 +148,14 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
 chrome.contextMenus.onClicked.addListener(function (info, tab) {
     if (info.menuItemId === "toggleTranslation" && tab?.id) {
         chrome.tabs.sendMessage(tab.id, { action: "toggleTranslation" }).catch(() => { });
+    }
+});
+
+chrome.storage.onChanged.addListener(function (changes) {
+    if (changes.showContextMenu !== undefined) {
+        chrome.contextMenus.update("toggleTranslation", {
+            visible: changes.showContextMenu.newValue !== false
+        }).catch(() => {});
     }
 });
 
