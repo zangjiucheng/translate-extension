@@ -35,6 +35,10 @@ function applyI18n(t) {
         const key = el.dataset.i18n;
         if (t[key] !== undefined) el.textContent = t[key];
     });
+    document.querySelectorAll('[data-i18n-tip]').forEach(el => {
+        const key = el.dataset.i18nTip;
+        if (t[key] !== undefined) el.dataset.tip = t[key];
+    });
 }
 
 function populateLanguageSelect(selected) {
@@ -83,7 +87,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             'compatibleApiKey', 'compatibleModel', 'compatibleEndpoint',
             'delayBetweenRequests', 'maxToken', 'concurrencyLimit',
             'maxRetries', 'timeout',
-            'toggleBlueBackground', 'realTimeTranslation', 'showProgressPopup', 'excludeList', 'hidePromptAllSites', 'showContextMenu'
+            'toggleBlueBackground', 'realTimeTranslation', 'showProgressPopup', 'excludeList', 'hidePromptAllSites', 'showContextMenu', 'autoRetranslateDomain'
         ]);
 
         const lang = items.targetLanguage || 'en';
@@ -114,6 +118,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         document.getElementById('showProgressPopup').checked = items.showProgressPopup !== false;
         document.getElementById('hidePromptAllSites').checked = items.hidePromptAllSites === true;
         document.getElementById('showContextMenu').checked = items.showContextMenu !== false;
+        document.getElementById('autoRetranslateDomain').checked = items.autoRetranslateDomain !== false;
         document.getElementById('excludeList').value = (items.excludeList && Array.isArray(items.excludeList)) ? items.excludeList.join('\n') : '';
     } catch (error) {
         console.error('Error loading settings:', error);
@@ -151,6 +156,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             document.getElementById('showProgressPopup').checked = true;
             document.getElementById('hidePromptAllSites').checked = false;
             document.getElementById('showContextMenu').checked = true;
+            document.getElementById('autoRetranslateDomain').checked = true;
         },
         exclude: () => {
             document.getElementById('excludeList').value = '';
@@ -164,6 +170,10 @@ document.addEventListener('DOMContentLoaded', async () => {
                 resetHandlers[btn.dataset.reset]?.();
             }
         });
+    });
+
+    document.querySelectorAll('.help-icon').forEach(el => {
+        el.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); });
     });
 });
 
@@ -192,6 +202,7 @@ document.getElementById('saveBtn').addEventListener('click', async () => {
     const showProgressPopup = document.getElementById('showProgressPopup').checked;
     const hidePromptAllSites = document.getElementById('hidePromptAllSites').checked;
     const showContextMenu = document.getElementById('showContextMenu').checked;
+    const autoRetranslateDomain = document.getElementById('autoRetranslateDomain').checked;
     const excludeList = document.getElementById('excludeList').value.split(/\r?\n/).map(url => url.trim()).filter(url => url);
 
     const saveData = {
@@ -208,7 +219,7 @@ document.getElementById('saveBtn').addEventListener('click', async () => {
         compatibleEndpoint: providerSettings['openai-compatible'].endpoint.trim(),
         delayBetweenRequests, maxToken,
         concurrencyLimit, maxRetries, timeout,
-        toggleBlueBackground, realTimeTranslation, showProgressPopup, hidePromptAllSites, showContextMenu, excludeList
+        toggleBlueBackground, realTimeTranslation, showProgressPopup, hidePromptAllSites, showContextMenu, autoRetranslateDomain, excludeList
     };
 
     try {

@@ -23,7 +23,7 @@
       </div>
       <div class="settings-card">
         <div class="form-group">
-          <label for="targetLanguage" data-i18n="targetLangLabel">Target language</label>
+          <label for="targetLanguage"><span data-i18n="targetLangLabel">Target language</span><span class="help-icon" tabindex="0" role="img" aria-label="help" data-i18n-tip="tip_targetLanguage"></span></label>
           <select id="targetLanguage"><!-- populated by JS --></select>
         </div>
       </div>
@@ -39,7 +39,7 @@
       </div>
       <div class="settings-card">
         <div class="form-group">
-          <label for="apiProvider" data-i18n="providerLabel">Provider</label>
+          <label for="apiProvider"><span data-i18n="providerLabel">Provider</span><span class="help-icon" tabindex="0" role="img" aria-label="help" data-i18n-tip="tip_apiProvider"></span></label>
           <select id="apiProvider">
             <option value="gemini">Google (Gemini)</option>
             <option value="openai">OpenAI (ChatGPT)</option>
@@ -48,15 +48,15 @@
           </select>
         </div>
         <div class="form-group" id="endpointGroup" style="display:none">
-          <label for="endpointUrl" data-i18n="endpointLabel">Endpoint URL</label>
+          <label for="endpointUrl"><span data-i18n="endpointLabel">Endpoint URL</span><span class="help-icon" tabindex="0" role="img" aria-label="help" data-i18n-tip="tip_endpointUrl"></span></label>
           <input type="text" id="endpointUrl" placeholder="https://api.example.com/v1/chat/completions" autocomplete="off" spellcheck="false">
         </div>
         <div class="form-group">
-          <label for="apiKey" data-i18n="apiKeyLabel">API Key</label>
+          <label for="apiKey"><span data-i18n="apiKeyLabel">API Key</span><span class="help-icon" tabindex="0" role="img" aria-label="help" data-i18n-tip="tip_apiKey"></span></label>
           <input type="password" id="apiKey" placeholder="" autocomplete="off" spellcheck="false">
         </div>
         <div class="form-group">
-          <label for="aiModel" data-i18n="aiModelLabel">AI Model</label>
+          <label for="aiModel"><span data-i18n="aiModelLabel">AI Model</span><span class="help-icon" tabindex="0" role="img" aria-label="help" data-i18n-tip="tip_aiModel"></span></label>
           <input type="text" id="aiModel" placeholder="" autocomplete="off" spellcheck="false">
         </div>
       </div>
@@ -72,7 +72,7 @@
       </div>
       <div class="settings-card">
         <div class="form-group">
-          <label for="maxToken" data-i18n="maxTokenLabel">Max output tokens</label>
+          <label for="maxToken"><span data-i18n="maxTokenLabel">Max output tokens</span><span class="help-icon" tabindex="0" role="img" aria-label="help" data-i18n-tip="tip_maxToken"></span></label>
           <input type="number" id="maxToken" min="1" max="1000000" placeholder="65536">
         </div>
       </div>
@@ -88,19 +88,19 @@
       </div>
       <div class="settings-card">
         <div class="form-group">
-          <label for="delayBetweenRequests" data-i18n="delayLabel">Delay between requests (s)</label>
+          <label for="delayBetweenRequests"><span data-i18n="delayLabel">Delay between requests (s)</span><span class="help-icon" tabindex="0" role="img" aria-label="help" data-i18n-tip="tip_delayBetweenRequests"></span></label>
           <input type="number" id="delayBetweenRequests" min="0" max="3600" placeholder="10">
         </div>
         <div class="form-group">
-          <label for="concurrencyLimit" data-i18n="concurrencyLabel">Concurrency limit</label>
+          <label for="concurrencyLimit"><span data-i18n="concurrencyLabel">Concurrency limit</span><span class="help-icon" tabindex="0" role="img" aria-label="help" data-i18n-tip="tip_concurrencyLimit"></span></label>
           <input type="number" id="concurrencyLimit" min="1" max="50" placeholder="10">
         </div>
         <div class="form-group">
-          <label for="maxRetries" data-i18n="maxRetriesLabel">Max retries on error</label>
+          <label for="maxRetries"><span data-i18n="maxRetriesLabel">Max retries on error</span><span class="help-icon" tabindex="0" role="img" aria-label="help" data-i18n-tip="tip_maxRetries"></span></label>
           <input type="number" id="maxRetries" min="0" max="10" placeholder="3">
         </div>
         <div class="form-group">
-          <label for="timeout" data-i18n="timeoutLabel">API timeout (seconds)</label>
+          <label for="timeout"><span data-i18n="timeoutLabel">API timeout (seconds)</span><span class="help-icon" tabindex="0" role="img" aria-label="help" data-i18n-tip="tip_timeout"></span></label>
           <input type="number" id="timeout" min="1" max="600" placeholder="180">
         </div>
       </div>
@@ -115,28 +115,33 @@
       </div>
       <div class="settings-card">
         <label class="toggle-group" for="toggleBlueBackground">
-          <span data-i18n="showHighlightLabel">Show translation highlight</span>
+          <span><span data-i18n="showHighlightLabel">Show translation highlight</span><span class="help-icon" tabindex="0" role="img" aria-label="help" data-i18n-tip="tip_toggleBlueBackground"></span></span>
           <input type="checkbox" id="toggleBlueBackground">
           <span class="toggle-switch" aria-hidden="true"></span>
         </label>
         <label class="toggle-group" for="realTimeTranslation">
-          <span data-i18n="autoTranslateLabel">Auto translate</span>
+          <span><span data-i18n="autoTranslateLabel">Auto translate</span><span class="help-icon" tabindex="0" role="img" aria-label="help" data-i18n-tip="tip_realTimeTranslation"></span></span>
           <input type="checkbox" id="realTimeTranslation">
           <span class="toggle-switch" aria-hidden="true"></span>
         </label>
         <label class="toggle-group" for="showProgressPopup">
-          <span data-i18n="showProgressLabel">Show progress popup</span>
+          <span><span data-i18n="showProgressLabel">Show progress popup</span><span class="help-icon" tabindex="0" role="img" aria-label="help" data-i18n-tip="tip_showProgressPopup"></span></span>
           <input type="checkbox" id="showProgressPopup">
           <span class="toggle-switch" aria-hidden="true"></span>
         </label>
         <label class="toggle-group" for="hidePromptAllSites">
-          <span data-i18n="hidePromptLabel">Never ask before translating</span>
+          <span><span data-i18n="hidePromptLabel">Never ask before translating</span><span class="help-icon" tabindex="0" role="img" aria-label="help" data-i18n-tip="tip_hidePromptAllSites"></span></span>
           <input type="checkbox" id="hidePromptAllSites">
           <span class="toggle-switch" aria-hidden="true"></span>
         </label>
         <label class="toggle-group" for="showContextMenu">
-          <span data-i18n="showContextMenuLabel">Show toggle in context menu</span>
+          <span><span data-i18n="showContextMenuLabel">Show toggle in context menu</span><span class="help-icon" tabindex="0" role="img" aria-label="help" data-i18n-tip="tip_showContextMenu"></span></span>
           <input type="checkbox" id="showContextMenu">
+          <span class="toggle-switch" aria-hidden="true"></span>
+        </label>
+        <label class="toggle-group" for="autoRetranslateDomain">
+          <span><span data-i18n="autoRetranslateDomainLabel">Auto re-translate within domain</span><span class="help-icon" tabindex="0" role="img" aria-label="help" data-i18n-tip="tip_autoRetranslateDomain"></span></span>
+          <input type="checkbox" id="autoRetranslateDomain">
           <span class="toggle-switch" aria-hidden="true"></span>
         </label>
       </div>
@@ -152,7 +157,7 @@
       </div>
       <div class="settings-card">
         <div class="form-group">
-          <label for="excludeList" data-i18n="excludeListLabel">Sites to exclude</label>
+          <label for="excludeList"><span data-i18n="excludeListLabel">Sites to exclude</span><span class="help-icon" tabindex="0" role="img" aria-label="help" data-i18n-tip="tip_excludeList"></span></label>
           <textarea id="excludeList" rows="5" placeholder="https://example.com&#10;https://www.example.org" spellcheck="false"></textarea>
         </div>
       </div>

@@ -450,6 +450,8 @@
     let activeObservers = [];
     const observedRoots = new WeakSet();
     let observerDebounceTimer = null;
+    let userInteractionTimer = null;
+    let userInteractionListenersAttached = false;
     let progressInterval = null;
     let statusContainer = null;
     let statusShadowRoot = null;
@@ -458,45 +460,296 @@
     let minimizedDiv = null;
     let domUpdateQueue = [];
     let isApplyingUpdates = false;
+    let pendingRetranslation = false;
 
-    const observerConfig = { childList: true, subtree: true, characterData: true };
+    const observerConfig = {
+        childList: true,
+        subtree: true,
+        characterData: true,
+        attributes: true,
+        attributeFilter: ['style', 'class', 'hidden', 'aria-hidden']
+    };
 
     function initTranslation() {
         try {
-            chrome.storage.local.get(['targetLanguage', 'realTimeTranslation', 'excludeList', 'hidePromptAllSites'], function (items) {
-                try { watchForNewContent(); } catch (e) { }
+            const reloaded = isPageReloaded();
+            chrome.storage.local.get(
+                ['targetLanguage', 'realTimeTranslation', 'excludeList', 'hidePromptAllSites', 'autoRetranslateDomain', 'toggleBlueBackground'],
+                async function (items) {
+                    try { watchForNewContent(); } catch (e) { }
+                    try { watchUserInteractions(); } catch (e) { }
 
-                const pageLang = getPageLanguage();
-                const chosenLang = items.targetLanguage || 'en';
-                applyStrings(chosenLang);
-                const pageLangPrimary = pageLang ? pageLang.split('-')[0].toLowerCase() : null;
-                const chosenLangPrimary = chosenLang.split('-')[0].toLowerCase();
+                    const pageLang = getPageLanguage();
+                    const chosenLang = items.targetLanguage || 'en';
+                    applyStrings(chosenLang);
 
-                const translationStarter = () => {
-                    if (isTranslating) return;
-                    if (!translationStarted) return;
-                    startTranslation();
-                };
+                    if (reloaded) {
+                        await clearPageCache();
+                    } else {
+                        const restored = await tryRestoreFromCache();
+                        if (restored) {
+                            translationStarted = true;
+                            if (items.toggleBlueBackground) {
+                                try {
+                                    document.querySelectorAll('[data-translation-status="translated"]').forEach(b => {
+                                        if (b.dataset && b.dataset.geminiIgnore !== 'true') b.classList.add('translated-text');
+                                    });
+                                } catch (e) { }
+                            }
+                            rememberTranslatedDomain();
+                            pendingRetranslation = true;
+                            scheduleRetranslationIfNeeded();
+                            return;
+                        }
+                    }
+                    const pageLangPrimary = pageLang ? pageLang.split('-')[0].toLowerCase() : null;
+                    const chosenLangPrimary = chosenLang.split('-')[0].toLowerCase();
 
-                if (items.realTimeTranslation === true) {
+                    const translationStarter = () => {
+                        if (isTranslating) return;
+                        if (!translationStarted) return;
+                        startTranslation();
+                    };
+
                     const currentUrl = window.location.href;
                     const excludeList = items.excludeList || [];
                     let siteOrigin = '';
                     try { siteOrigin = new URL(currentUrl).origin; } catch (e) { }
-                    if (excludeList.some(prefix => currentUrl.startsWith(prefix) || siteOrigin === prefix)) return;
-                    translationStarted = true;
-                    setTimeout(translationStarter, 100);
-                    setTimeout(translationStarter, 1500);
-                } else {
-                    if (!IS_TOP_FRAME) return;
-                    if (!pageLangPrimary || pageLangPrimary !== chosenLangPrimary) {
-                        if (items.hidePromptAllSites !== true) {
-                            createTranslationPrompt();
+                    const isExcluded = excludeList.some(prefix => currentUrl.startsWith(prefix) || siteOrigin === prefix);
+
+                    const autoRetranslateEnabled = items.autoRetranslateDomain !== false;
+
+                    const beginAutoTranslation = () => {
+                        if (isExcluded) return;
+                        translationStarted = true;
+                        setTimeout(translationStarter, 100);
+                        setTimeout(translationStarter, 1500);
+                    };
+
+                    if (items.realTimeTranslation === true) {
+                        beginAutoTranslation();
+                        return;
+                    }
+
+                    if (autoRetranslateEnabled && !isExcluded) {
+                        querySessionDomainKnown((known) => {
+                            if (known) {
+                                beginAutoTranslation();
+                                return;
+                            }
+                            showPromptIfNeeded();
+                        });
+                        return;
+                    }
+
+                    showPromptIfNeeded();
+
+                    function showPromptIfNeeded() {
+                        if (!IS_TOP_FRAME) return;
+                        if (!pageLangPrimary || pageLangPrimary !== chosenLangPrimary) {
+                            if (items.hidePromptAllSites !== true) {
+                                createTranslationPrompt();
+                            }
                         }
                     }
                 }
-            });
+            );
         } catch (error) { }
+    }
+
+    function querySessionDomainKnown(callback) {
+        try {
+            chrome.runtime.sendMessage({ action: 'sessionIsDomainKnown' }, (response) => {
+                if (chrome.runtime.lastError) { callback(false); return; }
+                callback(!!response?.known);
+            });
+        } catch (e) { callback(false); }
+    }
+
+    function rememberTranslatedDomain() {
+        try {
+            chrome.runtime.sendMessage({ action: 'sessionMarkTranslated' }).catch(() => { });
+        } catch (e) { }
+    }
+
+    const PAGE_CACHE_PREFIX = 'pageCache_';
+    const PAGE_CACHE_MAX_ENTRIES = 500;
+
+    function computeStringHash(s) {
+        let hash = 0x811c9dc5;
+        for (let i = 0; i < s.length; i++) {
+            hash ^= s.charCodeAt(i);
+            hash = (hash * 0x01000193) >>> 0;
+        }
+        return hash.toString(36);
+    }
+
+    function isPageReloaded() {
+        try {
+            const navEntries = performance.getEntriesByType('navigation');
+            if (navEntries && navEntries.length > 0) return navEntries[0].type === 'reload';
+        } catch (e) { }
+        try { if (performance.navigation && performance.navigation.type === 1) return true; } catch (e) { }
+        return false;
+    }
+
+    function getCurrentPageKey() {
+        try {
+            const url = new URL(window.location.href);
+            url.hash = '';
+            return PAGE_CACHE_PREFIX + computeStringHash(url.href);
+        } catch (e) { return null; }
+    }
+
+    function collectCacheableBlocks() {
+        const result = [];
+        if (!document.body) return result;
+        try {
+            const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_ELEMENT, {
+                acceptNode: (node) => {
+                    if (!node || !(node instanceof Element)) return NodeFilter.FILTER_REJECT;
+                    if (node.dataset?.translationWrapper === 'true') return NodeFilter.FILTER_REJECT;
+                    if (node.dataset?.geminiIgnore === 'true') return NodeFilter.FILTER_REJECT;
+                    if (isFullyExcluded(node)) return NodeFilter.FILTER_REJECT;
+                    if (BLOCK_TAGS.has(node.nodeName)) return NodeFilter.FILTER_ACCEPT;
+                    return NodeFilter.FILTER_SKIP;
+                }
+            });
+            let el;
+            while (el = walker.nextNode()) result.push(el);
+        } catch (e) { }
+        return result;
+    }
+
+    function getBlockOriginalText(block) {
+        if (block.dataset?.translationStatus === 'translated' && typeof block.dataset.originalHtml === 'string') {
+            const temp = document.createElement('div');
+            temp.innerHTML = block.dataset.originalHtml;
+            return (temp.textContent || '').trim().replace(/\s+/g, ' ');
+        }
+        return (block.textContent || '').trim().replace(/\s+/g, ' ');
+    }
+
+    function computeBlockTextKey(text) {
+        if (!text) return '';
+        return computeStringHash(text);
+    }
+
+    function getPageCache() {
+        return new Promise(resolve => {
+            try {
+                const key = getCurrentPageKey();
+                if (!key) { resolve(null); return; }
+                chrome.runtime.sendMessage({ action: 'pageCacheGet', key }, (response) => {
+                    if (chrome.runtime.lastError || !response) { resolve(null); return; }
+                    resolve(response.cache || null);
+                });
+            } catch (e) { resolve(null); }
+        });
+    }
+
+    function savePageCache(cache) {
+        return new Promise(resolve => {
+            try {
+                const key = getCurrentPageKey();
+                if (!key) { resolve(false); return; }
+                chrome.runtime.sendMessage({ action: 'pageCacheSet', key, cache }, (response) => {
+                    if (chrome.runtime.lastError || !response) { resolve(false); return; }
+                    resolve(!!response.saved);
+                });
+            } catch (e) { resolve(false); }
+        });
+    }
+
+    function clearPageCache() {
+        return new Promise(resolve => {
+            try {
+                const key = getCurrentPageKey();
+                if (!key) { resolve(); return; }
+                chrome.runtime.sendMessage({ action: 'pageCacheDelete', key }, () => {
+                    void chrome.runtime.lastError;
+                    resolve();
+                });
+            } catch (e) { resolve(); }
+        });
+    }
+
+    function pruneOldCaches() {
+        return new Promise(resolve => {
+            try {
+                chrome.runtime.sendMessage({ action: 'pageCachePrune', maxEntries: PAGE_CACHE_MAX_ENTRIES }, () => {
+                    void chrome.runtime.lastError;
+                    resolve();
+                });
+            } catch (e) { resolve(); }
+        });
+    }
+
+    function compositeBlockKey(textKey, tagName) {
+        return textKey + '|' + (tagName || '');
+    }
+
+    async function tryRestoreFromCache() {
+        const cache = await getPageCache();
+        if (!cache || !Array.isArray(cache.blocks)) return false;
+        const map = new Map();
+        for (const entry of cache.blocks) {
+            if (entry && entry.textKey && entry.tagName) {
+                map.set(compositeBlockKey(entry.textKey, entry.tagName), entry);
+            }
+        }
+        if (map.size === 0) return false;
+        const currentBlocks = collectCacheableBlocks();
+        const consumed = new Set();
+        let applied = 0;
+        for (const block of currentBlocks) {
+            if (!block.isConnected) continue;
+            const text = getBlockOriginalText(block);
+            if (!text) continue;
+            const key = compositeBlockKey(computeBlockTextKey(text), block.tagName);
+            if (consumed.has(key)) continue;
+            const entry = map.get(key);
+            if (!entry) continue;
+            try {
+                block.dataset.originalHtml = entry.originalHtml;
+                block.dataset.translatedHtml = entry.translatedHtml;
+                block.innerHTML = entry.translatedHtml;
+                block.dataset.translationStatus = 'translated';
+                consumed.add(key);
+                applied++;
+            } catch (e) { }
+        }
+        return applied > 0;
+    }
+
+    async function saveCurrentTranslationToCache() {
+        const blocks = collectCacheableBlocks();
+        if (blocks.length === 0) return;
+        const entries = [];
+        const seen = new Set();
+        for (const block of blocks) {
+            if (block.dataset?.translationStatus !== 'translated') continue;
+            if (typeof block.dataset.translatedHtml !== 'string') continue;
+            if (typeof block.dataset.originalHtml !== 'string') continue;
+            const text = getBlockOriginalText(block);
+            if (!text) continue;
+            const textKey = computeBlockTextKey(text);
+            const composite = compositeBlockKey(textKey, block.tagName);
+            if (seen.has(composite)) continue;
+            seen.add(composite);
+            entries.push({
+                textKey,
+                tagName: block.tagName,
+                originalHtml: block.dataset.originalHtml,
+                translatedHtml: block.dataset.translatedHtml
+            });
+        }
+        if (entries.length === 0) return;
+        const saved = await savePageCache({
+            blocks: entries,
+            savedAt: Date.now()
+        });
+        if (saved) pruneOldCaches().catch(() => { });
     }
 
     function getPageLanguage() {
@@ -516,6 +769,7 @@
         if (promptContainer || document.getElementById('gemini-translator-prompt-container')) return;
         promptContainer = document.createElement('div');
         promptContainer.id = 'gemini-translator-prompt-container';
+        promptContainer.dataset.geminiIgnore = 'true';
         promptContainer.style.cssText = 'position:fixed;top:0;right:0;z-index:2147483647;';
         promptShadowRoot = promptContainer.attachShadow({ mode: 'open' });
 
@@ -564,6 +818,7 @@
         yesButton.addEventListener('click', function () {
             removePrompt();
             translationStarted = true;
+            rememberTranslatedDomain();
             startTranslation();
             try { chrome.runtime.sendMessage({ action: 'startTranslationAllFrames' }).catch(() => { }); } catch (e) { }
         });
@@ -595,17 +850,36 @@
         if (translationHasError) return;
         let hasRelevantChange = false;
         for (const mutation of mutations) {
+            if (isInsideExtensionUi(mutation.target)) continue;
+            if (mutation.type === 'attributes') {
+                const target = mutation.target;
+                if (target && target.nodeType === Node.ELEMENT_NODE && !isFullyExcluded(target)) {
+                    if (hasUntranslatedDescendant(target)) hasRelevantChange = true;
+                }
+                continue;
+            }
             if (mutation.type === 'characterData') {
                 const parent = mutation.target.parentElement;
                 if (parent && !isFullyExcluded(parent) && isTranslatableText(mutation.target.textContent)) {
                     const block = findBlockAncestor(parent);
-                    if (block && block.dataset?.translationStatus !== 'translated' && block.dataset?.translationStatus !== 'processing' && block.dataset?.translationStatus !== 'original') {
-                        hasRelevantChange = true;
+                    if (block) {
+                        const status = block.dataset?.translationStatus;
+                        if (status === 'translated') {
+                            if (resetIfDivergedFromTranslation(block)) hasRelevantChange = true;
+                        } else if (status !== 'processing' && status !== 'original') {
+                            hasRelevantChange = true;
+                        }
                     }
                 }
                 continue;
             }
             if (mutation.type !== 'childList') continue;
+            if (mutation.target && mutation.target.nodeType === Node.ELEMENT_NODE) {
+                const targetBlock = findBlockAncestor(mutation.target);
+                if (targetBlock && targetBlock.dataset?.translationStatus === 'translated') {
+                    if (resetIfDivergedFromTranslation(targetBlock)) hasRelevantChange = true;
+                }
+            }
             for (const node of mutation.addedNodes) {
                 if (node.nodeType === Node.ELEMENT_NODE) {
                     attachObserversTo(node);
@@ -615,15 +889,98 @@
                 }
             }
         }
-        if (hasRelevantChange && translationStarted && !isTranslating && !translationCancelled) {
-            clearTimeout(observerDebounceTimer);
-            observerDebounceTimer = setTimeout(() => {
-                if (translationStarted && !isTranslating && !translationCancelled) {
-                    startTranslation();
-                }
-            }, 600);
+        if (hasRelevantChange && translationStarted && !translationCancelled) {
+            if (isTranslating || isApplyingUpdates) {
+                pendingRetranslation = true;
+            } else {
+                clearTimeout(observerDebounceTimer);
+                observerDebounceTimer = setTimeout(() => {
+                    if (translationStarted && !isTranslating && !translationCancelled) {
+                        startTranslation();
+                    }
+                }, 600);
+            }
         }
     };
+
+    function isInsideExtensionUi(node) {
+        let current = node;
+        while (current) {
+            if (current.nodeType === Node.ELEMENT_NODE && current.dataset?.geminiIgnore === 'true') return true;
+            if (current.parentElement) {
+                current = current.parentElement;
+            } else if (current.getRootNode && current.getRootNode() instanceof ShadowRoot) {
+                current = current.getRootNode().host;
+            } else {
+                break;
+            }
+        }
+        return false;
+    }
+
+    function resetIfDivergedFromTranslation(block) {
+        if (!block || !block.dataset) return false;
+        if (block.dataset.translationStatus !== 'translated') return false;
+        const lastTranslated = block.dataset.translatedHtml;
+        if (typeof lastTranslated !== 'string') return false;
+        if (block.innerHTML === lastTranslated) return false;
+        delete block.dataset.translationStatus;
+        return true;
+    }
+
+    function hasUntranslatedDescendant(root) {
+        if (!root || root.nodeType !== Node.ELEMENT_NODE) return false;
+        const status = root.dataset?.translationStatus;
+        if (status === 'translated' || status === 'processing' || status === 'original') return false;
+        for (const child of root.childNodes) {
+            if (child.nodeType === Node.TEXT_NODE && isTranslatableText(child.textContent)) {
+                return true;
+            }
+        }
+        try {
+            const walker = document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT, {
+                acceptNode: (node) => {
+                    if (!(node instanceof Element)) return NodeFilter.FILTER_REJECT;
+                    const s = node.dataset?.translationStatus;
+                    if (s === 'translated' || s === 'processing' || s === 'original') return NodeFilter.FILTER_REJECT;
+                    if (node.dataset?.translationWrapper === 'true') return NodeFilter.FILTER_REJECT;
+                    if (isFullyExcluded(node)) return NodeFilter.FILTER_REJECT;
+                    if (BLOCK_TAGS.has(node.nodeName)) return NodeFilter.FILTER_ACCEPT;
+                    return NodeFilter.FILTER_SKIP;
+                }
+            });
+            let el;
+            while (el = walker.nextNode()) {
+                for (const child of el.childNodes) {
+                    if (child.nodeType === Node.TEXT_NODE && isTranslatableText(child.textContent)) {
+                        return true;
+                    }
+                }
+            }
+        } catch (e) { }
+        return false;
+    }
+
+    function hasUntranslatedTextInDocument() {
+        if (!document.body) return false;
+        const queue = [document.body];
+        const visited = new WeakSet();
+        while (queue.length > 0) {
+            const root = queue.shift();
+            if (!root || visited.has(root)) continue;
+            visited.add(root);
+            if (hasUntranslatedDescendant(root)) return true;
+            try {
+                const elements = root.querySelectorAll ? root.querySelectorAll('*') : [];
+                for (const el of elements) {
+                    if (el.shadowRoot && !visited.has(el.shadowRoot)) {
+                        queue.push(el.shadowRoot);
+                    }
+                }
+            } catch (e) { }
+        }
+        return false;
+    }
 
     function containsTranslatableContent(node) {
         if (!node) return false;
@@ -652,6 +1009,8 @@
     function attachObserversTo(root) {
         if (!root) return;
         if (observedRoots.has(root)) return;
+        if (root.nodeType === Node.ELEMENT_NODE && root.dataset?.geminiIgnore === 'true') return;
+        if (root instanceof ShadowRoot && root.host?.dataset?.geminiIgnore === 'true') return;
         try {
             const observer = new MutationObserver(mutationCallback);
             observer.observe(root, observerConfig);
@@ -687,16 +1046,49 @@
         }
     }
 
+    function watchUserInteractions() {
+        if (userInteractionListenersAttached) return;
+        userInteractionListenersAttached = true;
+        const handler = () => {
+            if (!translationStarted) return;
+            if (translationCancelled || translationHasError) return;
+            clearTimeout(userInteractionTimer);
+            userInteractionTimer = setTimeout(() => {
+                if (!translationStarted) return;
+                if (translationCancelled || translationHasError) return;
+                if (isTranslating || isApplyingUpdates) {
+                    pendingRetranslation = true;
+                    return;
+                }
+                if (hasUntranslatedTextInDocument()) {
+                    startTranslation();
+                }
+            }, 800);
+        };
+        document.addEventListener('click', handler, { capture: true, passive: true });
+        document.addEventListener('focusin', handler, { capture: true, passive: true });
+        document.addEventListener('keyup', handler, { capture: true, passive: true });
+    }
+
     function disconnectAllObservers() {
+        const drained = [];
         activeObservers.forEach(obs => {
+            try {
+                const records = obs.takeRecords();
+                if (records && records.length > 0) drained.push(...records);
+            } catch (e) { }
             try { obs.disconnect(); } catch (e) { }
         });
         activeObservers = [];
+        if (drained.length > 0) {
+            try { mutationCallback(drained); } catch (e) { }
+        }
     }
 
     async function startTranslation() {
         if (isTranslating) return;
         isTranslating = true;
+        pendingRetranslation = false;
         translationCancelled = false;
         translationHasError = false;
         translatedUnitsCount = 0;
@@ -791,7 +1183,23 @@
         } finally {
             isTranslating = false;
             if (progressInterval) clearInterval(progressInterval);
+            cleanupProcessingMarkers();
+            scheduleRetranslationIfNeeded();
         }
+    }
+
+    function scheduleRetranslationIfNeeded() {
+        if (!translationStarted) return;
+        if (translationCancelled || translationHasError) return;
+        if (isTranslating || isApplyingUpdates) return;
+        if (!pendingRetranslation) return;
+        pendingRetranslation = false;
+        clearTimeout(observerDebounceTimer);
+        observerDebounceTimer = setTimeout(() => {
+            if (translationStarted && !isTranslating && !translationCancelled && !translationHasError) {
+                startTranslation();
+            }
+        }, 600);
     }
 
     async function applyQueuedUpdates() {
@@ -1357,6 +1765,7 @@
         removeStatusIndicator();
         statusContainer = document.createElement('div');
         statusContainer.id = 'gemini-translator-status-container';
+        statusContainer.dataset.geminiIgnore = 'true';
         statusContainer.style.cssText = 'position:fixed;bottom:0;right:0;z-index:2147483647;';
         statusShadowRoot = statusContainer.attachShadow({ mode: 'open' });
 
@@ -1455,6 +1864,7 @@
         if (!minimizedDiv) {
             minimizedDiv = document.createElement('div');
             minimizedDiv.id = 'gemini-translator-minimized-container';
+            minimizedDiv.dataset.geminiIgnore = 'true';
             minimizedDiv.style.cssText = 'position:fixed;bottom:0;right:0;z-index:2147483647;';
             const shadowRoot = minimizedDiv.attachShadow({ mode: 'open' });
             const style = document.createElement('style');
@@ -1556,6 +1966,7 @@
             }
         }
         chrome.runtime.sendMessage({ action: "translationComplete", message: st.translationCompleted }).catch(() => { });
+        saveCurrentTranslationToCache().catch(() => { });
         setTimeout(() => { if (!isTranslating) removeStatusIndicator(); }, 3000);
     }
 
@@ -1586,6 +1997,7 @@
                         removePrompt();
                         if (!isTranslating) {
                             translationStarted = true;
+                            rememberTranslatedDomain();
                             startTranslation();
                             sendResponse({ status: "starting" });
                         } else {
