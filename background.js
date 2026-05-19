@@ -66,6 +66,14 @@ function getTabState(tabId) {
     return state;
 }
 
+chrome.runtime.onStartup.addListener(function () {
+    withSessionLock(async () => {
+        try {
+            await chrome.storage.session.set({ sessionTabDomains: {}, sessionTranslatedDomains: [] });
+        } catch (e) { }
+    });
+});
+
 chrome.runtime.onInstalled.addListener(function (details) {
     if (details.reason === 'install') {
         chrome.runtime.openOptionsPage();
@@ -150,6 +158,11 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
         return false;
     }
 
+    if (request.action === "openOptionsPage") {
+        try { chrome.runtime.openOptionsPage(); } catch (e) { }
+        return false;
+    }
+
     if (request.action === "sessionMarkTranslated") {
         const hostname = getHostnameFromUrl(sender.tab?.url);
         if (hostname) {
@@ -207,28 +220,37 @@ function getHostnameFromUrl(url) {
     try { return new URL(url).hostname; } catch (e) { return ''; }
 }
 
-async function markSessionTranslated(tabId, hostname) {
-    const { sessionTabDomains = {}, sessionTranslatedDomains = [] } = await chrome.storage.session.get(['sessionTabDomains', 'sessionTranslatedDomains']);
-    const oldHostname = sessionTabDomains[tabId];
-    let mutated = false;
-    if (oldHostname !== hostname) {
-        sessionTabDomains[tabId] = hostname;
-        mutated = true;
-        if (oldHostname) {
-            const stillUsed = Object.values(sessionTabDomains).includes(oldHostname);
-            if (!stillUsed) {
-                const idx = sessionTranslatedDomains.indexOf(oldHostname);
-                if (idx >= 0) sessionTranslatedDomains.splice(idx, 1);
+let sessionMutex = Promise.resolve();
+function withSessionLock(fn) {
+    const run = sessionMutex.then(() => fn().catch(() => { }));
+    sessionMutex = run.catch(() => { });
+    return run;
+}
+
+function markSessionTranslated(tabId, hostname) {
+    return withSessionLock(async () => {
+        const { sessionTabDomains = {}, sessionTranslatedDomains = [] } = await chrome.storage.session.get(['sessionTabDomains', 'sessionTranslatedDomains']);
+        const oldHostname = sessionTabDomains[tabId];
+        let mutated = false;
+        if (oldHostname !== hostname) {
+            sessionTabDomains[tabId] = hostname;
+            mutated = true;
+            if (oldHostname) {
+                const stillUsed = Object.values(sessionTabDomains).includes(oldHostname);
+                if (!stillUsed) {
+                    const idx = sessionTranslatedDomains.indexOf(oldHostname);
+                    if (idx >= 0) sessionTranslatedDomains.splice(idx, 1);
+                }
             }
         }
-    }
-    if (!sessionTranslatedDomains.includes(hostname)) {
-        sessionTranslatedDomains.push(hostname);
-        mutated = true;
-    }
-    if (mutated) {
-        await chrome.storage.session.set({ sessionTabDomains, sessionTranslatedDomains });
-    }
+        if (!sessionTranslatedDomains.includes(hostname)) {
+            sessionTranslatedDomains.push(hostname);
+            mutated = true;
+        }
+        if (mutated) {
+            await chrome.storage.session.set({ sessionTabDomains, sessionTranslatedDomains });
+        }
+    });
 }
 
 async function isSessionDomainKnown(hostname) {
@@ -236,49 +258,53 @@ async function isSessionDomainKnown(hostname) {
     return Array.isArray(sessionTranslatedDomains) && sessionTranslatedDomains.includes(hostname);
 }
 
-async function untrackSessionTab(tabId) {
-    const { sessionTabDomains = {}, sessionTranslatedDomains = [] } = await chrome.storage.session.get(['sessionTabDomains', 'sessionTranslatedDomains']);
-    if (!(tabId in sessionTabDomains)) return;
-    const hostname = sessionTabDomains[tabId];
-    delete sessionTabDomains[tabId];
-    let removedHostname = false;
-    if (hostname) {
-        const stillUsed = Object.values(sessionTabDomains).includes(hostname);
-        if (!stillUsed) {
-            const idx = sessionTranslatedDomains.indexOf(hostname);
-            if (idx >= 0) {
-                sessionTranslatedDomains.splice(idx, 1);
-                removedHostname = true;
+function untrackSessionTab(tabId) {
+    return withSessionLock(async () => {
+        const { sessionTabDomains = {}, sessionTranslatedDomains = [] } = await chrome.storage.session.get(['sessionTabDomains', 'sessionTranslatedDomains']);
+        if (!(tabId in sessionTabDomains)) return;
+        const hostname = sessionTabDomains[tabId];
+        delete sessionTabDomains[tabId];
+        let removedHostname = false;
+        if (hostname) {
+            const stillUsed = Object.values(sessionTabDomains).includes(hostname);
+            if (!stillUsed) {
+                const idx = sessionTranslatedDomains.indexOf(hostname);
+                if (idx >= 0) {
+                    sessionTranslatedDomains.splice(idx, 1);
+                    removedHostname = true;
+                }
             }
         }
-    }
-    await chrome.storage.session.set({
-        sessionTabDomains,
-        ...(removedHostname ? { sessionTranslatedDomains } : {})
+        await chrome.storage.session.set({
+            sessionTabDomains,
+            ...(removedHostname ? { sessionTranslatedDomains } : {})
+        });
     });
 }
 
-async function handleTabUrlChange(tabId, newUrl) {
-    const newHostname = getHostnameFromUrl(newUrl);
-    const { sessionTabDomains = {}, sessionTranslatedDomains = [] } = await chrome.storage.session.get(['sessionTabDomains', 'sessionTranslatedDomains']);
-    const oldHostname = sessionTabDomains[tabId];
-    if (oldHostname === newHostname) return;
-    if (!oldHostname) return;
-    if (newHostname) {
-        sessionTabDomains[tabId] = newHostname;
-    } else {
-        delete sessionTabDomains[tabId];
-    }
-    const stillUsed = Object.values(sessionTabDomains).includes(oldHostname);
-    let updates = { sessionTabDomains };
-    if (!stillUsed) {
-        const idx = sessionTranslatedDomains.indexOf(oldHostname);
-        if (idx >= 0) {
-            sessionTranslatedDomains.splice(idx, 1);
-            updates.sessionTranslatedDomains = sessionTranslatedDomains;
+function handleTabUrlChange(tabId, newUrl) {
+    return withSessionLock(async () => {
+        const newHostname = getHostnameFromUrl(newUrl);
+        const { sessionTabDomains = {}, sessionTranslatedDomains = [] } = await chrome.storage.session.get(['sessionTabDomains', 'sessionTranslatedDomains']);
+        const oldHostname = sessionTabDomains[tabId];
+        if (oldHostname === newHostname) return;
+        if (!oldHostname) return;
+        if (newHostname) {
+            sessionTabDomains[tabId] = newHostname;
+        } else {
+            delete sessionTabDomains[tabId];
         }
-    }
-    await chrome.storage.session.set(updates);
+        const stillUsed = Object.values(sessionTabDomains).includes(oldHostname);
+        let updates = { sessionTabDomains };
+        if (!stillUsed) {
+            const idx = sessionTranslatedDomains.indexOf(oldHostname);
+            if (idx >= 0) {
+                sessionTranslatedDomains.splice(idx, 1);
+                updates.sessionTranslatedDomains = sessionTranslatedDomains;
+            }
+        }
+        await chrome.storage.session.set(updates);
+    });
 }
 
 chrome.contextMenus.onClicked.addListener(function (info, tab) {
@@ -327,12 +353,6 @@ async function processQueue() {
             } catch (error) {
                 console.error(`Error processing tab ${tabId}:`, error);
             }
-            if (globalRequestQueue.size > 0) {
-                const { delayBetweenRequests } = await new Promise(resolve =>
-                    chrome.storage.local.get(['delayBetweenRequests'], resolve));
-                const waitTime = (delayBetweenRequests ?? DEFAULTS.delayBetweenRequests);
-                await sleep(waitTime, null);
-            }
         }
     } finally {
         isProcessing = false;
@@ -355,6 +375,11 @@ async function processTab(tabId, tabData) {
     return new Promise(resolve => {
         const tryLaunch = () => {
             if (state.translationCancelled || state.abortController.signal.aborted) {
+                while (batchIndex < batches.length) {
+                    const { sendResponse } = batches[batchIndex];
+                    batchIndex++;
+                    safeSendResponse(sendResponse, { success: false, error: errorMessages.translationCancelled });
+                }
                 if (activeRequests === 0) resolve();
                 return;
             }
@@ -531,14 +556,7 @@ function extractJson(responseText) {
         } catch (e) { }
     }
 
-    const controlEscaped = candidate.replace(/[\x00-\x1F]/g, c => {
-        if (c === '\n') return '\\n';
-        if (c === '\r') return '\\r';
-        if (c === '\t') return '\\t';
-        if (c === '\b') return '\\b';
-        if (c === '\f') return '\\f';
-        return '\\u' + c.charCodeAt(0).toString(16).padStart(4, '0');
-    });
+    const controlEscaped = escapeControlCharsInJsonStrings(candidate);
     try {
         return JSON.parse(controlEscaped);
     } catch (e) { }
@@ -547,6 +565,29 @@ function extractJson(responseText) {
     if (Object.keys(partial).length > 0) return partial;
 
     throw new Error(errorMessages.jsonExtractFailed);
+}
+
+function escapeControlCharsInJsonStrings(text) {
+    let result = '';
+    let inString = false;
+    let escapeNext = false;
+    for (let i = 0; i < text.length; i++) {
+        const c = text[i];
+        if (escapeNext) { result += c; escapeNext = false; continue; }
+        if (c === '\\' && inString) { result += c; escapeNext = true; continue; }
+        if (c === '"') { result += c; inString = !inString; continue; }
+        if (inString && c.charCodeAt(0) < 0x20) {
+            if (c === '\n') result += '\\n';
+            else if (c === '\r') result += '\\r';
+            else if (c === '\t') result += '\\t';
+            else if (c === '\b') result += '\\b';
+            else if (c === '\f') result += '\\f';
+            else result += '\\u' + c.charCodeAt(0).toString(16).padStart(4, '0');
+            continue;
+        }
+        result += c;
+    }
+    return result;
 }
 
 function extractFirstBalancedObject(text) {
@@ -590,7 +631,22 @@ function unescapeJsonString(value) {
         return JSON.parse('"' + value + '"');
     } catch (e) { }
     try {
-        const repaired = value.replace(/(^|[^\\])((?:\\\\)*)"/g, '$1$2\\"');
+        let repaired = '';
+        let prevBackslashes = 0;
+        for (let i = 0; i < value.length; i++) {
+            const c = value[i];
+            if (c === '\\') {
+                repaired += c;
+                prevBackslashes++;
+                continue;
+            }
+            if (c === '"' && prevBackslashes % 2 === 0) {
+                repaired += '\\"';
+            } else {
+                repaired += c;
+            }
+            prevBackslashes = 0;
+        }
         return JSON.parse('"' + repaired + '"');
     } catch (e) { }
     return value;
@@ -757,10 +813,13 @@ async function translateWithGemini(text, retryLimit, signal, targetLanguage = 'E
         }
     };
     return performTranslation(async () => {
-        const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(actualModel)}:generateContent?key=${encodeURIComponent(apiKey)}`;
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(actualModel)}:generateContent`;
         const response = await fetchWithTimeout(url, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: {
+                'Content-Type': 'application/json',
+                'x-goog-api-key': apiKey
+            },
             body: JSON.stringify(requestBody),
             signal
         }, actualTimeout);
@@ -1003,8 +1062,24 @@ function openPageCacheDB() {
 function awaitTransaction(tx) {
     return new Promise((resolve, reject) => {
         tx.oncomplete = () => resolve();
-        tx.onabort = () => reject(tx.error || new Error('IDB tx aborted'));
-        tx.onerror = () => reject(tx.error || new Error('IDB tx error'));
+        tx.onabort = (e) => {
+            const err = tx.error || (e && e.target && e.target.error) || new Error('IDB tx aborted');
+            reject(err);
+        };
+        tx.onerror = (e) => {
+            const err = tx.error || (e && e.target && e.target.error) || new Error('IDB tx error');
+            reject(err);
+        };
+    });
+}
+
+function reqAsPromise(req) {
+    return new Promise((resolve, reject) => {
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = (e) => {
+            try { e.preventDefault(); } catch (err) { }
+            reject(req.error || new Error('IDB request failed'));
+        };
     });
 }
 
@@ -1016,11 +1091,9 @@ async function pageCacheGet(key) {
         const tx = db.transaction(PAGE_CACHE_STORE, 'readonly');
         const store = tx.objectStore(PAGE_CACHE_STORE);
         let result = null;
-        const req = store.get(key);
-        req.onsuccess = () => { result = req.result || null; };
-        req.onerror = () => { result = null; };
-        try { await awaitTransaction(tx); } catch (e) { return null; }
-        return result;
+        try { result = await reqAsPromise(store.get(key)); } catch (e) { result = null; }
+        try { await awaitTransaction(tx); } catch (e) { }
+        return result || null;
     } catch (e) { return null; }
     finally { try { db.close(); } catch (e) { } }
 }
@@ -1033,13 +1106,16 @@ async function pageCacheSet(key, cache) {
         const tx = db.transaction(PAGE_CACHE_STORE, 'readwrite');
         const store = tx.objectStore(PAGE_CACHE_STORE);
         const record = { ...cache, key };
-        let reqOk = false;
-        const req = store.put(record);
-        req.onsuccess = () => { reqOk = true; };
-        req.onerror = () => { reqOk = false; };
+        if (!record.savedAt) record.savedAt = Date.now();
+        try { await reqAsPromise(store.put(record)); } catch (e) { return false; }
         try { await awaitTransaction(tx); } catch (e) { return false; }
-        return reqOk;
-    } catch (e) { return false; }
+        return true;
+    } catch (e) {
+        if (e && e.name === 'QuotaExceededError') {
+            try { await pageCachePrune(Math.floor(500 / 2)); } catch (err) { }
+        }
+        return false;
+    }
     finally { try { db.close(); } catch (e) { } }
 }
 
@@ -1050,9 +1126,7 @@ async function pageCacheDelete(key) {
     try {
         const tx = db.transaction(PAGE_CACHE_STORE, 'readwrite');
         const store = tx.objectStore(PAGE_CACHE_STORE);
-        const req = store.delete(key);
-        req.onsuccess = () => { };
-        req.onerror = () => { };
+        try { await reqAsPromise(store.delete(key)); } catch (e) { }
         try { await awaitTransaction(tx); } catch (e) { }
     } catch (e) { }
     finally { try { db.close(); } catch (e) { } }
@@ -1060,11 +1134,16 @@ async function pageCacheDelete(key) {
 
 function cleanupLegacyPageCache() {
     try {
-        chrome.storage.local.get(null, (all) => {
-            if (chrome.runtime.lastError || !all) return;
-            const oldKeys = Object.keys(all).filter(k => k.startsWith('pageCache_'));
-            if (oldKeys.length === 0) return;
-            chrome.storage.local.remove(oldKeys, () => { void chrome.runtime.lastError; });
+        chrome.storage.local.get(['legacyPageCacheCleaned'], (marker) => {
+            if (chrome.runtime.lastError) return;
+            if (marker && marker.legacyPageCacheCleaned) return;
+            chrome.storage.local.get(null, (all) => {
+                if (chrome.runtime.lastError || !all) return;
+                const oldKeys = Object.keys(all).filter(k => k.startsWith('pageCache_'));
+                const finalize = () => chrome.storage.local.set({ legacyPageCacheCleaned: 1 }, () => { void chrome.runtime.lastError; });
+                if (oldKeys.length === 0) { finalize(); return; }
+                chrome.storage.local.remove(oldKeys, () => { void chrome.runtime.lastError; finalize(); });
+            });
         });
     } catch (e) { }
 }
@@ -1073,31 +1152,35 @@ async function pageCachePrune(maxEntries) {
     const limit = Math.max(1, Number.isFinite(maxEntries) ? maxEntries : 500);
     let db;
     try { db = await openPageCacheDB(); } catch (e) { return; }
+    let total = 0;
     try {
-        const tx = db.transaction(PAGE_CACHE_STORE, 'readwrite');
-        const store = tx.objectStore(PAGE_CACHE_STORE);
-        const total = await new Promise((resolve) => {
-            const req = store.count();
-            req.onsuccess = () => resolve(req.result || 0);
-            req.onerror = () => resolve(0);
+        const txCount = db.transaction(PAGE_CACHE_STORE, 'readonly');
+        const storeCount = txCount.objectStore(PAGE_CACHE_STORE);
+        try { total = await reqAsPromise(storeCount.count()) || 0; } catch (e) { total = 0; }
+        try { await awaitTransaction(txCount); } catch (e) { }
+    } catch (e) { }
+    if (total <= limit) {
+        try { db.close(); } catch (e) { }
+        return;
+    }
+    const toDelete = total - limit;
+    try {
+        const txDel = db.transaction(PAGE_CACHE_STORE, 'readwrite');
+        const storeDel = txDel.objectStore(PAGE_CACHE_STORE);
+        const index = storeDel.index('savedAt');
+        await new Promise((resolve) => {
+            let deleted = 0;
+            const cursorReq = index.openCursor();
+            cursorReq.onsuccess = (event) => {
+                const cursor = event.target.result;
+                if (!cursor || deleted >= toDelete) { resolve(); return; }
+                try { cursor.delete(); } catch (e) { }
+                deleted++;
+                cursor.continue();
+            };
+            cursorReq.onerror = (e) => { try { e.preventDefault(); } catch (err) { } resolve(); };
         });
-        if (total > limit) {
-            const toDelete = total - limit;
-            const index = store.index('savedAt');
-            await new Promise((resolve) => {
-                let deleted = 0;
-                const cursorReq = index.openCursor();
-                cursorReq.onsuccess = (event) => {
-                    const cursor = event.target.result;
-                    if (!cursor || deleted >= toDelete) { resolve(); return; }
-                    try { cursor.delete(); } catch (e) { }
-                    deleted++;
-                    cursor.continue();
-                };
-                cursorReq.onerror = () => resolve();
-            });
-        }
-        await awaitTransaction(tx).catch(() => { });
+        try { await awaitTransaction(txDel); } catch (e) { }
     } catch (e) { }
     finally { try { db.close(); } catch (e) { } }
 }

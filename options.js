@@ -191,6 +191,22 @@ document.getElementById('apiProvider').addEventListener('change', () => {
 document.getElementById('saveBtn').addEventListener('click', async () => {
     saveCurrentProviderToMemory();
 
+    const compatibleEndpointRaw = providerSettings['openai-compatible'].endpoint.trim();
+    if (currentProvider === 'openai-compatible' && compatibleEndpointRaw) {
+        try {
+            const parsedEndpoint = new URL(compatibleEndpointRaw);
+            if (parsedEndpoint.protocol !== 'https:' && parsedEndpoint.protocol !== 'http:') {
+                const t = getT(document.getElementById('targetLanguage').value);
+                showStatus(t.saveError, 'error');
+                return;
+            }
+        } catch (e) {
+            const t = getT(document.getElementById('targetLanguage').value);
+            showStatus(t.saveError, 'error');
+            return;
+        }
+    }
+
     const targetLanguage = document.getElementById('targetLanguage').value;
     const delayBetweenRequests = clampInt(document.getElementById('delayBetweenRequests').value, 0, 3600, Math.round(DEFAULTS.delayBetweenRequests / 1000)) * 1000;
     const maxToken = clampInt(document.getElementById('maxToken').value, 1, 1000000, DEFAULTS.maxToken);
