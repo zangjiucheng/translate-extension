@@ -57,6 +57,9 @@ document.addEventListener('DOMContentLoaded', async () => {
                 } else if (response.status === 'starting') {
                     setStatus(t.startMessage, 'success');
                     setTimeout(() => window.close(), 900);
+                } else if (response.status === 'warningShown') {
+                    setStatus(t.warningShown, 'info');
+                    setTimeout(() => window.close(), 1400);
                 } else if (response.status === 'cancelled') {
                     setStatus(t.translationCancelled, 'info');
                     translateBtn.disabled = false;

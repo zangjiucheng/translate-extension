@@ -19,7 +19,7 @@ const errorMessages = {
 
 const DEFAULTS = Object.freeze({
     apiProvider: 'gemini',
-    geminiModel: 'gemini-3.1-flash-lite-preview',
+    geminiModel: 'gemini-3.1-flash-lite',
     openaiModel: 'gpt-5.4-nano-2026-03-17',
     anthropicModel: 'claude-haiku-4-5-20251001',
     compatibleModel: '',
@@ -66,13 +66,22 @@ function getTabState(tabId) {
     return state;
 }
 
+chrome.runtime.onStartup.addListener(function () {
+    withSessionLock(async () => {
+        try {
+            await chrome.storage.session.set({ sessionTabDomains: {}, sessionTranslatedDomains: [] });
+        } catch (e) { }
+    });
+});
+
 chrome.runtime.onInstalled.addListener(function (details) {
     if (details.reason === 'install') {
         chrome.runtime.openOptionsPage();
     }
+    cleanupLegacyPageCache();
     chrome.storage.local.get(
         ['apiProvider', 'targetLanguage', 'geminiModel', 'openaiModel', 'anthropicModel', 'compatibleModel',
-         'batchSize', 'maxBatchLength', 'delayBetweenRequests', 'maxToken', 'concurrencyLimit', 'maxRetries', 'timeout', 'showContextMenu'],
+         'batchSize', 'maxBatchLength', 'delayBetweenRequests', 'maxToken', 'concurrencyLimit', 'maxRetries', 'timeout', 'showContextMenu', 'autoRetranslateDomain'],
         function (items) {
             const toSet = {};
             if (!items.apiProvider) toSet.apiProvider = DEFAULTS.apiProvider;
@@ -88,6 +97,7 @@ chrome.runtime.onInstalled.addListener(function (details) {
             if (items.maxRetries === undefined) toSet.maxRetries = DEFAULTS.maxRetries;
             if (items.timeout === undefined) toSet.timeout = DEFAULTS.timeout;
             if (items.showContextMenu === undefined) toSet.showContextMenu = true;
+            if (items.autoRetranslateDomain === undefined) toSet.autoRetranslateDomain = true;
             if (Object.keys(toSet).length > 0) chrome.storage.local.set(toSet);
             chrome.contextMenus.removeAll(() => {
                 chrome.contextMenus.create({
@@ -120,6 +130,11 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
         return true;
     }
 
+    if (request.action === "startTranslationAllFrames") {
+        chrome.tabs.sendMessage(tabId, { action: "startTranslationFromPopup" }).catch(() => { });
+        return false;
+    }
+
     if (request.action === "cancelTranslation") {
         const state = getTabState(tabId);
         state.translationCancelled = true;
@@ -142,8 +157,155 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
         activeTranslationTabs.delete(tabId);
         return false;
     }
+
+    if (request.action === "openOptionsPage") {
+        try { chrome.runtime.openOptionsPage(); } catch (e) { }
+        return false;
+    }
+
+    if (request.action === "sessionMarkTranslated") {
+        const hostname = getHostnameFromUrl(sender.tab?.url);
+        if (hostname) {
+            markSessionTranslated(tabId, hostname).catch(() => { });
+        }
+        sendResponse({ ok: true });
+        return false;
+    }
+
+    if (request.action === "sessionIsDomainKnown") {
+        const hostname = getHostnameFromUrl(sender.tab?.url);
+        if (!hostname) { sendResponse({ known: false }); return false; }
+        isSessionDomainKnown(hostname).then(known => {
+            if (known) {
+                markSessionTranslated(tabId, hostname).catch(() => { });
+            }
+            sendResponse({ known });
+        }).catch(() => sendResponse({ known: false }));
+        return true;
+    }
+
+    if (request.action === "pageCacheGet") {
+        pageCacheGet(request.key)
+            .then(cache => sendResponse({ cache }))
+            .catch(() => sendResponse({ cache: null }));
+        return true;
+    }
+
+    if (request.action === "pageCacheSet") {
+        pageCacheSet(request.key, request.cache)
+            .then(saved => sendResponse({ saved }))
+            .catch(() => sendResponse({ saved: false }));
+        return true;
+    }
+
+    if (request.action === "pageCacheDelete") {
+        pageCacheDelete(request.key)
+            .then(() => sendResponse({ ok: true }))
+            .catch(() => sendResponse({ ok: false }));
+        return true;
+    }
+
+    if (request.action === "pageCachePrune") {
+        pageCachePrune(request.maxEntries)
+            .then(() => sendResponse({ ok: true }))
+            .catch(() => sendResponse({ ok: false }));
+        return true;
+    }
+
     return false;
 });
+
+function getHostnameFromUrl(url) {
+    if (!url) return '';
+    try { return new URL(url).hostname; } catch (e) { return ''; }
+}
+
+let sessionMutex = Promise.resolve();
+function withSessionLock(fn) {
+    const run = sessionMutex.then(() => fn().catch(() => { }));
+    sessionMutex = run.catch(() => { });
+    return run;
+}
+
+function markSessionTranslated(tabId, hostname) {
+    return withSessionLock(async () => {
+        const { sessionTabDomains = {}, sessionTranslatedDomains = [] } = await chrome.storage.session.get(['sessionTabDomains', 'sessionTranslatedDomains']);
+        const oldHostname = sessionTabDomains[tabId];
+        let mutated = false;
+        if (oldHostname !== hostname) {
+            sessionTabDomains[tabId] = hostname;
+            mutated = true;
+            if (oldHostname) {
+                const stillUsed = Object.values(sessionTabDomains).includes(oldHostname);
+                if (!stillUsed) {
+                    const idx = sessionTranslatedDomains.indexOf(oldHostname);
+                    if (idx >= 0) sessionTranslatedDomains.splice(idx, 1);
+                }
+            }
+        }
+        if (!sessionTranslatedDomains.includes(hostname)) {
+            sessionTranslatedDomains.push(hostname);
+            mutated = true;
+        }
+        if (mutated) {
+            await chrome.storage.session.set({ sessionTabDomains, sessionTranslatedDomains });
+        }
+    });
+}
+
+async function isSessionDomainKnown(hostname) {
+    const { sessionTranslatedDomains = [] } = await chrome.storage.session.get(['sessionTranslatedDomains']);
+    return Array.isArray(sessionTranslatedDomains) && sessionTranslatedDomains.includes(hostname);
+}
+
+function untrackSessionTab(tabId) {
+    return withSessionLock(async () => {
+        const { sessionTabDomains = {}, sessionTranslatedDomains = [] } = await chrome.storage.session.get(['sessionTabDomains', 'sessionTranslatedDomains']);
+        if (!(tabId in sessionTabDomains)) return;
+        const hostname = sessionTabDomains[tabId];
+        delete sessionTabDomains[tabId];
+        let removedHostname = false;
+        if (hostname) {
+            const stillUsed = Object.values(sessionTabDomains).includes(hostname);
+            if (!stillUsed) {
+                const idx = sessionTranslatedDomains.indexOf(hostname);
+                if (idx >= 0) {
+                    sessionTranslatedDomains.splice(idx, 1);
+                    removedHostname = true;
+                }
+            }
+        }
+        await chrome.storage.session.set({
+            sessionTabDomains,
+            ...(removedHostname ? { sessionTranslatedDomains } : {})
+        });
+    });
+}
+
+function handleTabUrlChange(tabId, newUrl) {
+    return withSessionLock(async () => {
+        const newHostname = getHostnameFromUrl(newUrl);
+        const { sessionTabDomains = {}, sessionTranslatedDomains = [] } = await chrome.storage.session.get(['sessionTabDomains', 'sessionTranslatedDomains']);
+        const oldHostname = sessionTabDomains[tabId];
+        if (oldHostname === newHostname) return;
+        if (!oldHostname) return;
+        if (newHostname) {
+            sessionTabDomains[tabId] = newHostname;
+        } else {
+            delete sessionTabDomains[tabId];
+        }
+        const stillUsed = Object.values(sessionTabDomains).includes(oldHostname);
+        let updates = { sessionTabDomains };
+        if (!stillUsed) {
+            const idx = sessionTranslatedDomains.indexOf(oldHostname);
+            if (idx >= 0) {
+                sessionTranslatedDomains.splice(idx, 1);
+                updates.sessionTranslatedDomains = sessionTranslatedDomains;
+            }
+        }
+        await chrome.storage.session.set(updates);
+    });
+}
 
 chrome.contextMenus.onClicked.addListener(function (info, tab) {
     if (info.menuItemId === "toggleTranslation" && tab?.id) {
@@ -169,6 +331,13 @@ chrome.tabs.onRemoved.addListener(function (tabId) {
     }
     globalRequestQueue.delete(tabId);
     activeTranslationTabs.delete(tabId);
+    untrackSessionTab(tabId).catch(() => { });
+});
+
+chrome.tabs.onUpdated.addListener(function (tabId, changeInfo) {
+    if (changeInfo.url) {
+        handleTabUrlChange(tabId, changeInfo.url).catch(() => { });
+    }
 });
 
 async function processQueue() {
@@ -183,12 +352,6 @@ async function processQueue() {
                 await processTab(tabId, tabData);
             } catch (error) {
                 console.error(`Error processing tab ${tabId}:`, error);
-            }
-            if (globalRequestQueue.size > 0) {
-                const { delayBetweenRequests } = await new Promise(resolve =>
-                    chrome.storage.local.get(['delayBetweenRequests'], resolve));
-                const waitTime = (delayBetweenRequests ?? DEFAULTS.delayBetweenRequests);
-                await sleep(waitTime, null);
             }
         }
     } finally {
@@ -212,6 +375,11 @@ async function processTab(tabId, tabData) {
     return new Promise(resolve => {
         const tryLaunch = () => {
             if (state.translationCancelled || state.abortController.signal.aborted) {
+                while (batchIndex < batches.length) {
+                    const { sendResponse } = batches[batchIndex];
+                    batchIndex++;
+                    safeSendResponse(sendResponse, { success: false, error: errorMessages.translationCancelled });
+                }
                 if (activeRequests === 0) resolve();
                 return;
             }
@@ -364,19 +532,124 @@ async function translateTextBatch(fragmentBatch, signal) {
 }
 
 function extractJson(responseText) {
-    let cleaned = responseText.trim();
+    let cleaned = (responseText || '').trim();
     cleaned = cleaned.replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/i, '').trim();
+
     try {
         return JSON.parse(cleaned);
-    } catch (e) {
-        const firstBrace = cleaned.indexOf('{');
-        const lastBrace = cleaned.lastIndexOf('}');
-        if (firstBrace >= 0 && lastBrace > firstBrace) {
-            const candidate = cleaned.slice(firstBrace, lastBrace + 1);
-            return JSON.parse(candidate);
-        }
-        throw e;
+    } catch (e) { }
+
+    const balanced = extractFirstBalancedObject(cleaned);
+    if (balanced) {
+        try {
+            return JSON.parse(balanced);
+        } catch (e) { }
     }
+
+    const firstBrace = cleaned.indexOf('{');
+    const lastBrace = cleaned.lastIndexOf('}');
+    let candidate = balanced || cleaned;
+    if (!balanced && firstBrace >= 0 && lastBrace > firstBrace) {
+        candidate = cleaned.slice(firstBrace, lastBrace + 1);
+        try {
+            return JSON.parse(candidate);
+        } catch (e) { }
+    }
+
+    const controlEscaped = escapeControlCharsInJsonStrings(candidate);
+    try {
+        return JSON.parse(controlEscaped);
+    } catch (e) { }
+
+    const partial = extractEntriesByRegex(controlEscaped);
+    if (Object.keys(partial).length > 0) return partial;
+
+    throw new Error(errorMessages.jsonExtractFailed);
+}
+
+function escapeControlCharsInJsonStrings(text) {
+    let result = '';
+    let inString = false;
+    let escapeNext = false;
+    for (let i = 0; i < text.length; i++) {
+        const c = text[i];
+        if (escapeNext) { result += c; escapeNext = false; continue; }
+        if (c === '\\' && inString) { result += c; escapeNext = true; continue; }
+        if (c === '"') { result += c; inString = !inString; continue; }
+        if (inString && c.charCodeAt(0) < 0x20) {
+            if (c === '\n') result += '\\n';
+            else if (c === '\r') result += '\\r';
+            else if (c === '\t') result += '\\t';
+            else if (c === '\b') result += '\\b';
+            else if (c === '\f') result += '\\f';
+            else result += '\\u' + c.charCodeAt(0).toString(16).padStart(4, '0');
+            continue;
+        }
+        result += c;
+    }
+    return result;
+}
+
+function extractFirstBalancedObject(text) {
+    let depth = 0;
+    let inString = false;
+    let escapeNext = false;
+    let start = -1;
+    for (let i = 0; i < text.length; i++) {
+        const c = text[i];
+        if (escapeNext) { escapeNext = false; continue; }
+        if (c === '\\') { escapeNext = true; continue; }
+        if (c === '"') { inString = !inString; continue; }
+        if (inString) continue;
+        if (c === '{') {
+            if (depth === 0) start = i;
+            depth++;
+        } else if (c === '}') {
+            depth--;
+            if (depth === 0 && start >= 0) {
+                return text.slice(start, i + 1);
+            }
+        }
+    }
+    return null;
+}
+
+function extractEntriesByRegex(text) {
+    const result = {};
+    const re = /"(TU_\d+)"\s*:\s*"([\s\S]*?)"\s*(?=,\s*"TU_\d+"\s*:\s*"|\}\s*$)/g;
+    let m;
+    while ((m = re.exec(text)) !== null) {
+        const key = m[1];
+        const rawValue = m[2];
+        result[key] = unescapeJsonString(rawValue);
+    }
+    return result;
+}
+
+function unescapeJsonString(value) {
+    try {
+        return JSON.parse('"' + value + '"');
+    } catch (e) { }
+    try {
+        let repaired = '';
+        let prevBackslashes = 0;
+        for (let i = 0; i < value.length; i++) {
+            const c = value[i];
+            if (c === '\\') {
+                repaired += c;
+                prevBackslashes++;
+                continue;
+            }
+            if (c === '"' && prevBackslashes % 2 === 0) {
+                repaired += '\\"';
+            } else {
+                repaired += c;
+            }
+            prevBackslashes = 0;
+        }
+        return JSON.parse('"' + repaired + '"');
+    } catch (e) { }
+    return value;
 }
 
 async function performTranslation(apiCall, retryLimit, signal) {
@@ -440,9 +713,25 @@ Any other characters (including HTML entities like \`&amp;\`, \`&lt;\`, \`&quot;
 9. **Technical terms** — Translate only if a well-established ${targetLanguage} term exists; otherwise keep the original or use an established loanword form.
 10. **Do NOT add, summarize, explain, or annotate** — Output translation only.
 
-## Output Format
+## Output Format (STRICT — must be machine-parseable)
 
-Return ONLY a single valid JSON object. Same keys as input. Each value is the translated string with placeholders preserved. No markdown fences, no commentary, no trailing text.
+Return EXACTLY one JSON object and nothing else. Your entire response must satisfy ALL of:
+
+- The very first character is \`{\`. The very last character is \`}\`. No leading or trailing whitespace, prose, comments, or extra characters.
+- The closing \`}\` that balances the opening \`{\` is the FINAL character of the response. Never emit a second JSON object, a follow-up explanation, an apology, or any text after that \`}\`.
+- Never wrap the response in markdown fences (\`\`\`json, \`\`\`, etc.) or HTML.
+- Same keys as the input, exactly. Do not add, rename, omit, reorder, or duplicate keys.
+- Each value is a JSON string containing the translation with all required placeholders preserved.
+
+Inside every string value, you MUST produce valid JSON string syntax:
+
+- Escape every literal \`"\` as \`\\"\`.
+- Escape every literal \`\\\` as \`\\\\\`.
+- Escape line breaks as \`\\n\` (or \`\\r\\n\`). Never emit a raw newline, carriage return, or tab inside a string value.
+- Do not emit any other raw control character (U+0000–U+001F). Use \`\\uXXXX\` if absolutely necessary.
+- The placeholder tags (\`<aN>\`, \`<tN>\`, \`<bN>\`, \`<sN>\`) are plain ASCII and do NOT need escaping; emit them verbatim inside the string.
+
+If you cannot translate a value, still emit a syntactically valid JSON string for that key (e.g. the original text wrapped in valid quotes). Never omit a key.
 
 ## Examples
 Note: the examples below use Japanese output only to illustrate placeholder structure rules. Your output must be in **${targetLanguage}**.
@@ -524,10 +813,13 @@ async function translateWithGemini(text, retryLimit, signal, targetLanguage = 'E
         }
     };
     return performTranslation(async () => {
-        const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(actualModel)}:generateContent?key=${encodeURIComponent(apiKey)}`;
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(actualModel)}:generateContent`;
         const response = await fetchWithTimeout(url, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: {
+                'Content-Type': 'application/json',
+                'x-goog-api-key': apiKey
+            },
             body: JSON.stringify(requestBody),
             signal
         }, actualTimeout);
@@ -580,7 +872,6 @@ async function translateWithGemini(text, retryLimit, signal, targetLanguage = 'E
             throw new Error(`${errorMessages.unknownError} (no candidates)`);
         }
         const candidate = data.candidates[0];
-        if (candidate.finishReason === 'MAX_TOKENS') throw new Error(errorMessages.maxTokensError);
         if (candidate.finishReason === 'SAFETY' || candidate.finishReason === 'BLOCKLIST' || candidate.finishReason === 'PROHIBITED_CONTENT') {
             throw new Error(`${errorMessages.invalidRequest} (content blocked: ${candidate.finishReason})`);
         }
@@ -588,6 +879,10 @@ async function translateWithGemini(text, retryLimit, signal, targetLanguage = 'E
         const responseText = Array.isArray(parts)
             ? parts.map(p => p?.text || '').join('')
             : '';
+        if (candidate.finishReason === 'MAX_TOKENS') {
+            if (!responseText) throw new Error(errorMessages.maxTokensError);
+            return responseText;
+        }
         if (!responseText) throw new Error(errorMessages.emptyResponse);
         return responseText;
     }, retryLimit, signal);
@@ -601,7 +896,6 @@ async function translateWithOpenAI(text, retryLimit, signal, targetLanguage = 'E
     const actualMaxToken = maxToken || DEFAULTS.maxToken;
     const actualTimeout = timeout || DEFAULTS.timeout;
     const prompt = createTranslationPrompt(text, targetLanguage);
-    // o1/o3/o4 reasoning models reject temperature and use max_completion_tokens
     const isReasoningModel = /^o\d/i.test(actualModel);
     const requestBody = {
         model: actualModel,
@@ -741,4 +1035,155 @@ async function translateWithAnthropic(text, retryLimit, signal, targetLanguage =
         if (!responseText) throw new Error(errorMessages.emptyResponse);
         return responseText;
     }, retryLimit, signal);
+}
+
+const PAGE_CACHE_DB_NAME = 'translationCache';
+const PAGE_CACHE_DB_VERSION = 1;
+const PAGE_CACHE_STORE = 'pages';
+
+function openPageCacheDB() {
+    return new Promise((resolve, reject) => {
+        let req;
+        try {
+            req = indexedDB.open(PAGE_CACHE_DB_NAME, PAGE_CACHE_DB_VERSION);
+        } catch (e) { reject(e); return; }
+        req.onupgradeneeded = (event) => {
+            try {
+                const db = event.target.result;
+                if (!db.objectStoreNames.contains(PAGE_CACHE_STORE)) {
+                    const store = db.createObjectStore(PAGE_CACHE_STORE, { keyPath: 'key' });
+                    store.createIndex('savedAt', 'savedAt', { unique: false });
+                }
+            } catch (e) { }
+        };
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = () => reject(req.error || new Error('IDB open failed'));
+        req.onblocked = () => reject(new Error('IDB open blocked'));
+    });
+}
+
+function awaitTransaction(tx) {
+    return new Promise((resolve, reject) => {
+        tx.oncomplete = () => resolve();
+        tx.onabort = (e) => {
+            const err = tx.error || (e && e.target && e.target.error) || new Error('IDB tx aborted');
+            reject(err);
+        };
+        tx.onerror = (e) => {
+            const err = tx.error || (e && e.target && e.target.error) || new Error('IDB tx error');
+            reject(err);
+        };
+    });
+}
+
+function reqAsPromise(req) {
+    return new Promise((resolve, reject) => {
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = (e) => {
+            try { e.preventDefault(); } catch (err) { }
+            reject(req.error || new Error('IDB request failed'));
+        };
+    });
+}
+
+async function pageCacheGet(key) {
+    if (!key) return null;
+    let db;
+    try { db = await openPageCacheDB(); } catch (e) { return null; }
+    try {
+        const tx = db.transaction(PAGE_CACHE_STORE, 'readonly');
+        const store = tx.objectStore(PAGE_CACHE_STORE);
+        let result = null;
+        try { result = await reqAsPromise(store.get(key)); } catch (e) { result = null; }
+        try { await awaitTransaction(tx); } catch (e) { }
+        return result || null;
+    } catch (e) { return null; }
+    finally { try { db.close(); } catch (e) { } }
+}
+
+async function pageCacheSet(key, cache) {
+    if (!key || !cache) return false;
+    let db;
+    try { db = await openPageCacheDB(); } catch (e) { return false; }
+    try {
+        const tx = db.transaction(PAGE_CACHE_STORE, 'readwrite');
+        const store = tx.objectStore(PAGE_CACHE_STORE);
+        const record = { ...cache, key };
+        if (!record.savedAt) record.savedAt = Date.now();
+        try { await reqAsPromise(store.put(record)); } catch (e) { return false; }
+        try { await awaitTransaction(tx); } catch (e) { return false; }
+        return true;
+    } catch (e) {
+        if (e && e.name === 'QuotaExceededError') {
+            try { await pageCachePrune(Math.floor(500 / 2)); } catch (err) { }
+        }
+        return false;
+    }
+    finally { try { db.close(); } catch (e) { } }
+}
+
+async function pageCacheDelete(key) {
+    if (!key) return;
+    let db;
+    try { db = await openPageCacheDB(); } catch (e) { return; }
+    try {
+        const tx = db.transaction(PAGE_CACHE_STORE, 'readwrite');
+        const store = tx.objectStore(PAGE_CACHE_STORE);
+        try { await reqAsPromise(store.delete(key)); } catch (e) { }
+        try { await awaitTransaction(tx); } catch (e) { }
+    } catch (e) { }
+    finally { try { db.close(); } catch (e) { } }
+}
+
+function cleanupLegacyPageCache() {
+    try {
+        chrome.storage.local.get(['legacyPageCacheCleaned'], (marker) => {
+            if (chrome.runtime.lastError) return;
+            if (marker && marker.legacyPageCacheCleaned) return;
+            chrome.storage.local.get(null, (all) => {
+                if (chrome.runtime.lastError || !all) return;
+                const oldKeys = Object.keys(all).filter(k => k.startsWith('pageCache_'));
+                const finalize = () => chrome.storage.local.set({ legacyPageCacheCleaned: 1 }, () => { void chrome.runtime.lastError; });
+                if (oldKeys.length === 0) { finalize(); return; }
+                chrome.storage.local.remove(oldKeys, () => { void chrome.runtime.lastError; finalize(); });
+            });
+        });
+    } catch (e) { }
+}
+
+async function pageCachePrune(maxEntries) {
+    const limit = Math.max(1, Number.isFinite(maxEntries) ? maxEntries : 500);
+    let db;
+    try { db = await openPageCacheDB(); } catch (e) { return; }
+    let total = 0;
+    try {
+        const txCount = db.transaction(PAGE_CACHE_STORE, 'readonly');
+        const storeCount = txCount.objectStore(PAGE_CACHE_STORE);
+        try { total = await reqAsPromise(storeCount.count()) || 0; } catch (e) { total = 0; }
+        try { await awaitTransaction(txCount); } catch (e) { }
+    } catch (e) { }
+    if (total <= limit) {
+        try { db.close(); } catch (e) { }
+        return;
+    }
+    const toDelete = total - limit;
+    try {
+        const txDel = db.transaction(PAGE_CACHE_STORE, 'readwrite');
+        const storeDel = txDel.objectStore(PAGE_CACHE_STORE);
+        const index = storeDel.index('savedAt');
+        await new Promise((resolve) => {
+            let deleted = 0;
+            const cursorReq = index.openCursor();
+            cursorReq.onsuccess = (event) => {
+                const cursor = event.target.result;
+                if (!cursor || deleted >= toDelete) { resolve(); return; }
+                try { cursor.delete(); } catch (e) { }
+                deleted++;
+                cursor.continue();
+            };
+            cursorReq.onerror = (e) => { try { e.preventDefault(); } catch (err) { } resolve(); };
+        });
+        try { await awaitTransaction(txDel); } catch (e) { }
+    } catch (e) { }
+    finally { try { db.close(); } catch (e) { } }
 }
