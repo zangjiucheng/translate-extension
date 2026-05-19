@@ -872,7 +872,6 @@ async function translateWithGemini(text, retryLimit, signal, targetLanguage = 'E
             throw new Error(`${errorMessages.unknownError} (no candidates)`);
         }
         const candidate = data.candidates[0];
-        if (candidate.finishReason === 'MAX_TOKENS') throw new Error(errorMessages.maxTokensError);
         if (candidate.finishReason === 'SAFETY' || candidate.finishReason === 'BLOCKLIST' || candidate.finishReason === 'PROHIBITED_CONTENT') {
             throw new Error(`${errorMessages.invalidRequest} (content blocked: ${candidate.finishReason})`);
         }
@@ -880,6 +879,10 @@ async function translateWithGemini(text, retryLimit, signal, targetLanguage = 'E
         const responseText = Array.isArray(parts)
             ? parts.map(p => p?.text || '').join('')
             : '';
+        if (candidate.finishReason === 'MAX_TOKENS') {
+            if (!responseText) throw new Error(errorMessages.maxTokensError);
+            return responseText;
+        }
         if (!responseText) throw new Error(errorMessages.emptyResponse);
         return responseText;
     }, retryLimit, signal);

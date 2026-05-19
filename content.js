@@ -46,8 +46,7 @@
         'TR', 'TBODY', 'THEAD', 'TFOOT', 'TABLE',
         'FORM', 'FIELDSET', 'LEGEND',
         'DETAILS', 'SUMMARY',
-        'DIALOG', 'OUTPUT',
-        'BODY'
+        'DIALOG', 'OUTPUT'
     ]);
 
     const INLINE_SKIP_TAGS = new Set([
@@ -747,7 +746,7 @@
             if (typeof entry.originalHtml === 'string' && !('originalHtml' in block.dataset)) {
                 block.dataset.originalHtml = entry.originalHtml;
             }
-            applyTranslation(tu, entry.translatedTemplate);
+            applyTranslation(tu, entry.translatedTemplate, true);
             return block.dataset?.translationStatus === 'translated';
         } catch (e) { return false; }
     }
@@ -887,6 +886,9 @@
         postNavigationCooldownUntil = Date.now() + 5000;
         clearTimeout(observerDebounceTimer);
         clearTimeout(userInteractionTimer);
+        pendingRetranslation = false;
+        try { translationUnits.clear(); } catch (e) { }
+        domUpdateQueue = [];
     }
 
     function isLikelyReactApp() {
@@ -899,8 +901,7 @@
                 if (noscript && /enable\s+javascript/i.test(noscript.textContent || '')) return true;
                 if (root.children.length > 50) return true;
             }
-            const muiCount = document.querySelectorAll('[class*="Mui"], [class*="ant-"], [class*="chakra-"]').length;
-            if (muiCount > 3) return true;
+            if (document.querySelector('[class^="Mui"], [class*=" Mui"], [class^="ant-"], [class*=" ant-"], [class^="chakra-"], [class*=" chakra-"]')) return true;
         } catch (e) { }
         return false;
     }
@@ -1031,9 +1032,7 @@
                     const block = findBlockAncestor(parent);
                     if (block) {
                         const status = block.dataset?.translationStatus;
-                        if (status === 'translated') {
-                            if (resetIfDivergedFromTranslation(block)) hasRelevantChange = true;
-                        } else if (status !== 'processing' && status !== 'original') {
+                        if (status !== 'translated' && status !== 'processing' && status !== 'original') {
                             hasRelevantChange = true;
                         }
                     }
@@ -1041,12 +1040,6 @@
                 continue;
             }
             if (mutation.type !== 'childList') continue;
-            if (mutation.target && mutation.target.nodeType === Node.ELEMENT_NODE) {
-                const targetBlock = findBlockAncestor(mutation.target);
-                if (targetBlock && targetBlock.dataset?.translationStatus === 'translated') {
-                    if (resetIfDivergedFromTranslation(targetBlock)) hasRelevantChange = true;
-                }
-            }
             for (const node of mutation.addedNodes) {
                 if (node.nodeType === Node.ELEMENT_NODE) {
                     attachObserversTo(node);
@@ -1547,7 +1540,7 @@
             }
             current = current.parentElement || (current.getRootNode?.() instanceof ShadowRoot ? current.getRootNode().host : null);
         }
-        return document.body;
+        return null;
     }
 
     function isFullyExcluded(element) {
@@ -1580,7 +1573,9 @@
         return str
             .replace(/&/g, '&amp;')
             .replace(/</g, '&lt;')
-            .replace(/>/g, '&gt;');
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
     }
 
     function collectTranslationUnits() {
@@ -1641,6 +1636,7 @@
         const placeholders = [];
         let template = '';
         let hasTranslatableText = false;
+        let anchorDepth = 0;
 
         function appendText(text) {
             if (!text) return;
@@ -1681,11 +1677,17 @@
             }
 
             if (node.nodeName === 'A') {
+                if (anchorDepth > 0) {
+                    for (const child of node.childNodes) visit(child);
+                    return;
+                }
                 const idx = placeholders.length;
                 const originalText = (node.textContent || '').trim();
                 placeholders.push({ type: 'anchor', ph: `a${idx}`, node, originalText });
                 template += `<a${idx}>`;
+                anchorDepth++;
                 for (const child of node.childNodes) visit(child);
+                anchorDepth--;
                 template += `</a${idx}>`;
                 return;
             }
@@ -1746,7 +1748,7 @@
         });
     }
 
-    function applyTranslation(tu, translatedTemplate) {
+    function applyTranslation(tu, translatedTemplate, fromCacheRestore) {
         if (!tu || !tu.block || !tu.block.isConnected) return;
         try {
             try { tu.block.dataset.tuTranslatedTemplate = translatedTemplate; } catch (e) { }
@@ -1783,7 +1785,7 @@
             } else {
                 tu.block.classList.remove('translated-text');
             }
-            translatedUnitsCount++;
+            if (!fromCacheRestore) translatedUnitsCount++;
         } catch (e) {
             if (tu.block && tu.block.dataset) {
                 delete tu.block.dataset.translationStatus;
@@ -1882,7 +1884,7 @@
                     try {
                         const tu = buildTU(block);
                         if (tu && tu.hasTranslatableText) {
-                            applyTranslation(tu, block.dataset.tuTranslatedTemplate);
+                            applyTranslation(tu, block.dataset.tuTranslatedTemplate, true);
                         } else if ('translatedHtml' in block.dataset) {
                             block.innerHTML = block.dataset.translatedHtml;
                             block.dataset.translationStatus = 'translated';
@@ -2209,7 +2211,7 @@
                             sendResponse({ status: "alreadyTranslating" });
                             return false;
                         }
-                        if (isLikelyReactApp()) {
+                        if (IS_TOP_FRAME && isLikelyReactApp()) {
                             if (!document.getElementById('gemini-translator-prompt-container')) {
                                 createTranslationPrompt(true);
                             }
