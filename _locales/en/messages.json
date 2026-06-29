@@ -1,10 +1,10 @@
 {
   "appName": {
-    "message": "AI Website Translator",
+    "message": "AI Website Translator (Fork)",
     "description": "Extension name (max 45 chars)"
   },
   "appDescription": {
-    "message": "Translate any webpage with AI APIs (Gemini, OpenAI, Anthropic, OpenAI-compatible). Supports 20+ languages.",
+    "message": "Translate any webpage with AI APIs (Gemini, OpenAI, DeepSeek, Anthropic, OpenAI-compatible). Supports 20+ languages. Fork",
     "description": "Extension description (max 132 chars)"
   },
   "contextMenuToggle": {
