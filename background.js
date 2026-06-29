@@ -22,6 +22,7 @@ const DEFAULTS = Object.freeze({
     geminiModel: 'gemini-3.1-flash-lite',
     openaiModel: 'gpt-5.4-nano-2026-03-17',
     anthropicModel: 'claude-haiku-4-5-20251001',
+    deepseekModel: 'deepseek-chat',
     compatibleModel: '',
     batchSize: 500,
     maxBatchLength: 65535,
@@ -80,8 +81,8 @@ chrome.runtime.onInstalled.addListener(function (details) {
     }
     cleanupLegacyPageCache();
     chrome.storage.local.get(
-        ['apiProvider', 'targetLanguage', 'geminiModel', 'openaiModel', 'anthropicModel', 'compatibleModel',
-         'batchSize', 'maxBatchLength', 'delayBetweenRequests', 'maxToken', 'concurrencyLimit', 'maxRetries', 'timeout', 'showContextMenu', 'autoRetranslateDomain'],
+        ['apiProvider', 'targetLanguage', 'geminiModel', 'openaiModel', 'anthropicModel', 'deepseekModel', 'compatibleModel',
+         'batchSize', 'maxBatchLength', 'delayBetweenRequests', 'maxToken', 'concurrencyLimit', 'maxRetries', 'timeout', 'showContextMenu', 'autoRetranslateDomain', 'hidePromptAllSites'],
         function (items) {
             const toSet = {};
             if (!items.apiProvider) toSet.apiProvider = DEFAULTS.apiProvider;
@@ -89,6 +90,7 @@ chrome.runtime.onInstalled.addListener(function (details) {
             if (!items.geminiModel) toSet.geminiModel = DEFAULTS.geminiModel;
             if (!items.openaiModel) toSet.openaiModel = DEFAULTS.openaiModel;
             if (!items.anthropicModel) toSet.anthropicModel = DEFAULTS.anthropicModel;
+            if (!items.deepseekModel) toSet.deepseekModel = DEFAULTS.deepseekModel;
             if (items.batchSize === undefined) toSet.batchSize = DEFAULTS.batchSize;
             if (items.maxBatchLength === undefined) toSet.maxBatchLength = DEFAULTS.maxBatchLength;
             if (items.delayBetweenRequests === undefined) toSet.delayBetweenRequests = DEFAULTS.delayBetweenRequests;
@@ -98,6 +100,7 @@ chrome.runtime.onInstalled.addListener(function (details) {
             if (items.timeout === undefined) toSet.timeout = DEFAULTS.timeout;
             if (items.showContextMenu === undefined) toSet.showContextMenu = true;
             if (items.autoRetranslateDomain === undefined) toSet.autoRetranslateDomain = true;
+            if (items.hidePromptAllSites === undefined) toSet.hidePromptAllSites = true;
             if (Object.keys(toSet).length > 0) chrome.storage.local.set(toSet);
             chrome.contextMenus.removeAll(() => {
                 chrome.contextMenus.create({
@@ -507,6 +510,8 @@ async function translateTextBatch(fragmentBatch, signal) {
         translatedJSONString = await translateWithOpenAI(jsonText, retryLimit, signal, langName);
     } else if (provider === 'anthropic') {
         translatedJSONString = await translateWithAnthropic(jsonText, retryLimit, signal, langName);
+    } else if (provider === 'deepseek') {
+        translatedJSONString = await translateWithDeepSeek(jsonText, retryLimit, signal, langName);
     } else if (provider === 'openai-compatible') {
         translatedJSONString = await translateWithOpenAICompatible(jsonText, retryLimit, signal, langName);
     } else {
@@ -517,7 +522,7 @@ async function translateTextBatch(fragmentBatch, signal) {
     try {
         translatedData = extractJson(translatedJSONString);
     } catch (e) {
-        throw new Error(`${errorMessages.jsonParseFailed} ${e.message}\nResponse: ${translatedJSONString.substring(0, 200)}`);
+        throw new Error(`${errorMessages.jsonParseFailed} ${e.message}`);
     }
 
     const translations = [];
@@ -1032,6 +1037,47 @@ async function translateWithAnthropic(text, retryLimit, signal, targetLanguage =
         }
         if (data?.stop_reason === 'max_tokens') throw new Error(errorMessages.maxTokensError);
         const responseText = data?.content?.[0]?.text || '';
+        if (!responseText) throw new Error(errorMessages.emptyResponse);
+        return responseText;
+    }, retryLimit, signal);
+}
+
+async function translateWithDeepSeek(text, retryLimit, signal, targetLanguage = 'English') {
+    const { deepseekApiKey: apiKey, deepseekModel: model, maxToken, timeout } = await new Promise(resolve =>
+        chrome.storage.local.get(['deepseekApiKey', 'deepseekModel', 'maxToken', 'timeout'], resolve));
+    if (!apiKey) throw new Error(errorMessages.apiKeyNotSet);
+    const actualModel = (model || '').trim() || DEFAULTS.deepseekModel;
+    const actualMaxToken = maxToken || DEFAULTS.maxToken;
+    const actualTimeout = timeout || DEFAULTS.timeout;
+    const prompt = createTranslationPrompt(text, targetLanguage);
+    const requestBody = {
+        model: actualModel,
+        messages: [{ role: 'user', content: prompt }],
+        max_tokens: actualMaxToken,
+        temperature: 0.2,
+        response_format: { type: 'json_object' }
+    };
+    return performTranslation(async () => {
+        const response = await fetchWithTimeout('https://api.deepseek.com/v1/chat/completions', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${apiKey}`
+            },
+            body: JSON.stringify(requestBody),
+            signal
+        }, actualTimeout);
+        let data;
+        try {
+            data = await response.json();
+        } catch (e) {
+            data = null;
+        }
+        if (!response.ok) handleOpenAIHttpError(response, data);
+        const choice = data?.choices?.[0];
+        if (!choice) throw new Error(`${errorMessages.unknownError} (no choices)`);
+        if (choice.finish_reason === 'length') throw new Error(errorMessages.maxTokensError);
+        const responseText = choice.message?.content || '';
         if (!responseText) throw new Error(errorMessages.emptyResponse);
         return responseText;
     }, retryLimit, signal);

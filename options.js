@@ -3,6 +3,7 @@ const DEFAULTS = Object.freeze({
     geminiModel: 'gemini-3.1-flash-lite',
     openaiModel: 'gpt-5.4-nano-2026-03-17',
     anthropicModel: 'claude-haiku-4-5-20251001',
+    deepseekModel: 'deepseek-chat',
     compatibleModel: '',
     batchSize: 500,
     maxBatchLength: 65535,
@@ -17,6 +18,7 @@ const MODEL_PLACEHOLDERS = {
     gemini: 'gemini-3.1-flash-lite',
     openai: 'gpt-5.4-nano-2026-03-17',
     anthropic: 'claude-haiku-4-5-20251001',
+    deepseek: 'deepseek-chat',
     'openai-compatible': ''
 };
 
@@ -24,6 +26,7 @@ const providerSettings = {
     gemini: { apiKey: '', model: DEFAULTS.geminiModel },
     openai: { apiKey: '', model: DEFAULTS.openaiModel },
     anthropic: { apiKey: '', model: DEFAULTS.anthropicModel },
+    deepseek: { apiKey: '', model: DEFAULTS.deepseekModel },
     'openai-compatible': { apiKey: '', model: DEFAULTS.compatibleModel, endpoint: '' }
 };
 
@@ -84,6 +87,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             'geminiApiKey', 'geminiModel',
             'openaiApiKey', 'openaiModel',
             'anthropicApiKey', 'anthropicModel',
+            'deepseekApiKey', 'deepseekModel',
             'compatibleApiKey', 'compatibleModel', 'compatibleEndpoint',
             'delayBetweenRequests', 'maxToken', 'concurrencyLimit',
             'maxRetries', 'timeout',
@@ -100,6 +104,8 @@ document.addEventListener('DOMContentLoaded', async () => {
         providerSettings.openai.model = items.openaiModel || DEFAULTS.openaiModel;
         providerSettings.anthropic.apiKey = items.anthropicApiKey || '';
         providerSettings.anthropic.model = items.anthropicModel || DEFAULTS.anthropicModel;
+        providerSettings.deepseek.apiKey = items.deepseekApiKey || '';
+        providerSettings.deepseek.model = items.deepseekModel || DEFAULTS.deepseekModel;
         providerSettings['openai-compatible'].apiKey = items.compatibleApiKey || '';
         providerSettings['openai-compatible'].model = items.compatibleModel || DEFAULTS.compatibleModel;
         providerSettings['openai-compatible'].endpoint = items.compatibleEndpoint || '';
@@ -116,7 +122,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         document.getElementById('toggleBlueBackground').checked = items.toggleBlueBackground === true;
         document.getElementById('realTimeTranslation').checked = items.realTimeTranslation === true;
         document.getElementById('showProgressPopup').checked = items.showProgressPopup !== false;
-        document.getElementById('hidePromptAllSites').checked = items.hidePromptAllSites === true;
+        document.getElementById('hidePromptAllSites').checked = items.hidePromptAllSites !== false;
         document.getElementById('showContextMenu').checked = items.showContextMenu !== false;
         document.getElementById('autoRetranslateDomain').checked = items.autoRetranslateDomain !== false;
         document.getElementById('excludeList').value = (items.excludeList && Array.isArray(items.excludeList)) ? items.excludeList.join('\n') : '';
@@ -136,6 +142,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             providerSettings.gemini = { apiKey: '', model: DEFAULTS.geminiModel };
             providerSettings.openai = { apiKey: '', model: DEFAULTS.openaiModel };
             providerSettings.anthropic = { apiKey: '', model: DEFAULTS.anthropicModel };
+            providerSettings.deepseek = { apiKey: '', model: DEFAULTS.deepseekModel };
             providerSettings['openai-compatible'] = { apiKey: '', model: DEFAULTS.compatibleModel, endpoint: '' };
             currentProvider = DEFAULTS.apiProvider;
             document.getElementById('apiProvider').value = currentProvider;
@@ -154,7 +161,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             document.getElementById('toggleBlueBackground').checked = false;
             document.getElementById('realTimeTranslation').checked = false;
             document.getElementById('showProgressPopup').checked = true;
-            document.getElementById('hidePromptAllSites').checked = false;
+            document.getElementById('hidePromptAllSites').checked = true;
             document.getElementById('showContextMenu').checked = true;
             document.getElementById('autoRetranslateDomain').checked = true;
         },
@@ -195,7 +202,7 @@ document.getElementById('saveBtn').addEventListener('click', async () => {
     if (currentProvider === 'openai-compatible' && compatibleEndpointRaw) {
         try {
             const parsedEndpoint = new URL(compatibleEndpointRaw);
-            if (parsedEndpoint.protocol !== 'https:' && parsedEndpoint.protocol !== 'http:') {
+            if (parsedEndpoint.protocol !== 'https:') {
                 const t = getT(document.getElementById('targetLanguage').value);
                 showStatus(t.saveError, 'error');
                 return;
@@ -230,6 +237,8 @@ document.getElementById('saveBtn').addEventListener('click', async () => {
         openaiModel: providerSettings.openai.model.trim() || DEFAULTS.openaiModel,
         anthropicApiKey: providerSettings.anthropic.apiKey,
         anthropicModel: providerSettings.anthropic.model.trim() || DEFAULTS.anthropicModel,
+        deepseekApiKey: providerSettings.deepseek.apiKey,
+        deepseekModel: providerSettings.deepseek.model.trim() || DEFAULTS.deepseekModel,
         compatibleApiKey: providerSettings['openai-compatible'].apiKey,
         compatibleModel: providerSettings['openai-compatible'].model.trim(),
         compatibleEndpoint: providerSettings['openai-compatible'].endpoint.trim(),

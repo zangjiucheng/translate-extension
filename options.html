@@ -16,22 +16,6 @@
     <section class="settings-section">
       <div class="section-header">
         <div class="section-header-text">
-          <h2 data-i18n="targetLangSection">Language</h2>
-          <span class="section-desc" data-i18n="targetLangDesc">Language to translate pages into</span>
-        </div>
-        <button class="btn-reset" type="button" data-reset="language" data-i18n="resetBtn">Reset</button>
-      </div>
-      <div class="settings-card">
-        <div class="form-group">
-          <label for="targetLanguage"><span data-i18n="targetLangLabel">Target language</span><span class="help-icon" tabindex="0" role="img" aria-label="help" data-i18n-tip="tip_targetLanguage"></span></label>
-          <select id="targetLanguage"><!-- populated by JS --></select>
-        </div>
-      </div>
-    </section>
-
-    <section class="settings-section">
-      <div class="section-header">
-        <div class="section-header-text">
           <h2 data-i18n="apiSection">API</h2>
           <span class="section-desc" data-i18n="apiDesc">AI connection settings</span>
         </div>
@@ -44,6 +28,7 @@
             <option value="gemini">Google (Gemini)</option>
             <option value="openai">OpenAI (ChatGPT)</option>
             <option value="anthropic">Anthropic (Claude)</option>
+            <option value="deepseek">DeepSeek</option>
             <option value="openai-compatible">OpenAI Compatible</option>
           </select>
         </div>
@@ -58,6 +43,52 @@
         <div class="form-group">
           <label for="aiModel"><span data-i18n="aiModelLabel">AI Model</span><span class="help-icon" tabindex="0" role="img" aria-label="help" data-i18n-tip="tip_aiModel"></span></label>
           <input type="text" id="aiModel" placeholder="" autocomplete="off" spellcheck="false">
+        </div>
+      </div>
+    </section>
+
+    <section class="settings-section">
+      <div class="section-header">
+        <div class="section-header-text">
+          <h2 data-i18n="targetLangSection">Language</h2>
+          <span class="section-desc" data-i18n="targetLangDesc">Language to translate pages into</span>
+        </div>
+        <button class="btn-reset" type="button" data-reset="language" data-i18n="resetBtn">Reset</button>
+      </div>
+      <div class="settings-card">
+        <div class="form-group">
+          <label for="targetLanguage"><span data-i18n="targetLangLabel">Target language</span><span class="help-icon" tabindex="0" role="img" aria-label="help" data-i18n-tip="tip_targetLanguage"></span></label>
+          <select id="targetLanguage"></select>
+        </div>
+      </div>
+    </section>
+
+    <section class="settings-section">
+      <div class="section-header">
+        <div class="section-header-text">
+          <h2 data-i18n="networkSection">Network</h2>
+          <span class="section-desc" data-i18n="networkDesc">Concurrency and retries</span>
+        </div>
+        <button class="btn-reset" type="button" data-reset="network" data-i18n="resetBtn">Reset</button>
+      </div>
+      <div class="settings-card">
+        <div class="settings-grid">
+          <div class="form-group">
+            <label for="delayBetweenRequests"><span data-i18n="delayLabel">Delay between requests (s)</span><span class="help-icon" tabindex="0" role="img" aria-label="help" data-i18n-tip="tip_delayBetweenRequests"></span></label>
+            <input type="number" id="delayBetweenRequests" min="0" max="3600" placeholder="10">
+          </div>
+          <div class="form-group">
+            <label for="concurrencyLimit"><span data-i18n="concurrencyLabel">Concurrency limit</span><span class="help-icon" tabindex="0" role="img" aria-label="help" data-i18n-tip="tip_concurrencyLimit"></span></label>
+            <input type="number" id="concurrencyLimit" min="1" max="50" placeholder="10">
+          </div>
+          <div class="form-group">
+            <label for="maxRetries"><span data-i18n="maxRetriesLabel">Max retries on error</span><span class="help-icon" tabindex="0" role="img" aria-label="help" data-i18n-tip="tip_maxRetries"></span></label>
+            <input type="number" id="maxRetries" min="0" max="10" placeholder="3">
+          </div>
+          <div class="form-group">
+            <label for="timeout"><span data-i18n="timeoutLabel">API timeout (seconds)</span><span class="help-icon" tabindex="0" role="img" aria-label="help" data-i18n-tip="tip_timeout"></span></label>
+            <input type="number" id="timeout" min="1" max="600" placeholder="180">
+          </div>
         </div>
       </div>
     </section>
@@ -81,42 +112,14 @@
     <section class="settings-section">
       <div class="section-header">
         <div class="section-header-text">
-          <h2 data-i18n="networkSection">Network</h2>
-          <span class="section-desc" data-i18n="networkDesc">Concurrency and retries</span>
-        </div>
-        <button class="btn-reset" type="button" data-reset="network" data-i18n="resetBtn">Reset</button>
-      </div>
-      <div class="settings-card">
-        <div class="form-group">
-          <label for="delayBetweenRequests"><span data-i18n="delayLabel">Delay between requests (s)</span><span class="help-icon" tabindex="0" role="img" aria-label="help" data-i18n-tip="tip_delayBetweenRequests"></span></label>
-          <input type="number" id="delayBetweenRequests" min="0" max="3600" placeholder="10">
-        </div>
-        <div class="form-group">
-          <label for="concurrencyLimit"><span data-i18n="concurrencyLabel">Concurrency limit</span><span class="help-icon" tabindex="0" role="img" aria-label="help" data-i18n-tip="tip_concurrencyLimit"></span></label>
-          <input type="number" id="concurrencyLimit" min="1" max="50" placeholder="10">
-        </div>
-        <div class="form-group">
-          <label for="maxRetries"><span data-i18n="maxRetriesLabel">Max retries on error</span><span class="help-icon" tabindex="0" role="img" aria-label="help" data-i18n-tip="tip_maxRetries"></span></label>
-          <input type="number" id="maxRetries" min="0" max="10" placeholder="3">
-        </div>
-        <div class="form-group">
-          <label for="timeout"><span data-i18n="timeoutLabel">API timeout (seconds)</span><span class="help-icon" tabindex="0" role="img" aria-label="help" data-i18n-tip="tip_timeout"></span></label>
-          <input type="number" id="timeout" min="1" max="600" placeholder="180">
-        </div>
-      </div>
-    </section>
-
-    <section class="settings-section">
-      <div class="section-header">
-        <div class="section-header-text">
           <h2 data-i18n="displaySection">Display & Behavior</h2>
         </div>
         <button class="btn-reset" type="button" data-reset="display" data-i18n="resetBtn">Reset</button>
       </div>
       <div class="settings-card">
-        <label class="toggle-group" for="toggleBlueBackground">
-          <span><span data-i18n="showHighlightLabel">Show translation highlight</span><span class="help-icon" tabindex="0" role="img" aria-label="help" data-i18n-tip="tip_toggleBlueBackground"></span></span>
-          <input type="checkbox" id="toggleBlueBackground">
+        <label class="toggle-group" for="hidePromptAllSites">
+          <span><span data-i18n="hidePromptLabel">Never ask before translating</span><span class="help-icon" tabindex="0" role="img" aria-label="help" data-i18n-tip="tip_hidePromptAllSites"></span></span>
+          <input type="checkbox" id="hidePromptAllSites">
           <span class="toggle-switch" aria-hidden="true"></span>
         </label>
         <label class="toggle-group" for="realTimeTranslation">
@@ -129,11 +132,6 @@
           <input type="checkbox" id="showProgressPopup">
           <span class="toggle-switch" aria-hidden="true"></span>
         </label>
-        <label class="toggle-group" for="hidePromptAllSites">
-          <span><span data-i18n="hidePromptLabel">Never ask before translating</span><span class="help-icon" tabindex="0" role="img" aria-label="help" data-i18n-tip="tip_hidePromptAllSites"></span></span>
-          <input type="checkbox" id="hidePromptAllSites">
-          <span class="toggle-switch" aria-hidden="true"></span>
-        </label>
         <label class="toggle-group" for="showContextMenu">
           <span><span data-i18n="showContextMenuLabel">Show toggle in context menu</span><span class="help-icon" tabindex="0" role="img" aria-label="help" data-i18n-tip="tip_showContextMenu"></span></span>
           <input type="checkbox" id="showContextMenu">
@@ -142,6 +140,11 @@
         <label class="toggle-group" for="autoRetranslateDomain">
           <span><span data-i18n="autoRetranslateDomainLabel">Auto re-translate within domain</span><span class="help-icon" tabindex="0" role="img" aria-label="help" data-i18n-tip="tip_autoRetranslateDomain"></span></span>
           <input type="checkbox" id="autoRetranslateDomain">
+          <span class="toggle-switch" aria-hidden="true"></span>
+        </label>
+        <label class="toggle-group" for="toggleBlueBackground">
+          <span><span data-i18n="showHighlightLabel">Show translation highlight</span><span class="help-icon" tabindex="0" role="img" aria-label="help" data-i18n-tip="tip_toggleBlueBackground"></span></span>
+          <input type="checkbox" id="toggleBlueBackground">
           <span class="toggle-switch" aria-hidden="true"></span>
         </label>
       </div>

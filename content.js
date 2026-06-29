@@ -1078,10 +1078,6 @@
         return false;
     }
 
-    function resetIfDivergedFromTranslation(block) {
-        return false;
-    }
-
     function hasUntranslatedDescendant(root) {
         if (!root || root.nodeType !== Node.ELEMENT_NODE) return false;
         const status = root.dataset?.translationStatus;
@@ -1861,6 +1857,11 @@
         return document.createTextNode(parsedNode.textContent || '');
     }
 
+    function setBlockContent(block, html) {
+        const doc = new DOMParser().parseFromString(html, 'text/html');
+        block.replaceChildren(...doc.body.childNodes);
+    }
+
     function toggleAllTranslations() {
         if (isTranslating) return;
         clearTimeout(observerDebounceTimer);
@@ -1874,7 +1875,7 @@
             blocks.forEach(block => {
                 if (shouldRevert) {
                     if ('originalHtml' in block.dataset) {
-                        block.innerHTML = block.dataset.originalHtml;
+                        setBlockContent(block, block.dataset.originalHtml);
                         block.dataset.translationStatus = 'original';
                         block.classList.remove('translated-text');
                     }
@@ -1886,17 +1887,17 @@
                         if (tu && tu.hasTranslatableText) {
                             applyTranslation(tu, block.dataset.tuTranslatedTemplate, true);
                         } else if ('translatedHtml' in block.dataset) {
-                            block.innerHTML = block.dataset.translatedHtml;
+                            setBlockContent(block, block.dataset.translatedHtml);
                             block.dataset.translationStatus = 'translated';
                         }
                     } catch (e) {
                         if ('translatedHtml' in block.dataset) {
-                            block.innerHTML = block.dataset.translatedHtml;
+                            setBlockContent(block, block.dataset.translatedHtml);
                             block.dataset.translationStatus = 'translated';
                         }
                     }
                 } else if ('translatedHtml' in block.dataset) {
-                    block.innerHTML = block.dataset.translatedHtml;
+                    setBlockContent(block, block.dataset.translatedHtml);
                     block.dataset.translationStatus = 'translated';
                 }
                 if (highlightTranslated) block.classList.add('translated-text');
