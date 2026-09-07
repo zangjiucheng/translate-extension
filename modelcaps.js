@@ -1,4 +1,5 @@
 const ANTHROPIC_MAX_OUTPUT_TOKENS = 64000;
+const DEEPSEEK_MAX_OUTPUT_TOKENS = 384000;
 
 const REASONING_LEVELS = Object.freeze(['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max']);
 
@@ -140,11 +141,24 @@ function modelCapsForCompatible() {
     return createModelCaps({ recognized: false, mechanism: 'passthrough', levels: REASONING_LEVELS, defaultLevel: '' });
 }
 
+function modelCapsForDeepSeek() {
+    // Official V4 chat models share one thinking API: thinking.type plus reasoning_effort.
+    // Default off so page translation stays fast; the API itself defaults to thinking enabled.
+    return createModelCaps({
+        recognized: true,
+        mechanism: 'thinkingToggle',
+        levels: ['off', 'low', 'high', 'max'],
+        defaultLevel: 'off',
+        maxOutputTokens: DEEPSEEK_MAX_OUTPUT_TOKENS
+    });
+}
+
 function resolveModelCapabilities(provider, modelId) {
     const id = typeof modelId === 'string' ? modelId.trim().toLowerCase() : '';
     if (provider === 'gemini') return modelCapsForGemini(id);
     if (provider === 'openai') return modelCapsForOpenAI(id);
     if (provider === 'anthropic') return modelCapsForAnthropic(id);
+    if (provider === 'deepseek') return modelCapsForDeepSeek();
     if (provider === 'openai-compatible') return modelCapsForCompatible();
     return createModelCaps({});
 }
@@ -194,6 +208,9 @@ function buildReasoningFields(caps, level, maxTokens, streaming) {
             if (budget < 1024) return null;
             return { thinking: { type: 'enabled', budget_tokens: budget } };
         }
+        case 'thinkingToggle':
+            if (level === 'off') return { thinking: { type: 'disabled' } };
+            return { thinking: { type: 'enabled' }, reasoning_effort: level };
         default:
             return null;
     }

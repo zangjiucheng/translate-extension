@@ -100,10 +100,12 @@ const DEFAULTS = Object.freeze({
     geminiModel: 'gemini-3.5-flash-lite',
     openaiModel: 'gpt-5.6-luna',
     anthropicModel: 'claude-haiku-4-5-20251001',
+    deepseekModel: 'deepseek-v4-flash',
     compatibleModel: '',
     geminiReasoning: '',
     openaiReasoning: 'off',
     anthropicReasoning: '',
+    deepseekReasoning: 'off',
     compatibleReasoning: '',
     batchSize: 500,
     maxBatchLength: 65535,
@@ -229,7 +231,7 @@ function handleExtensionInstalled(details) {
     }
     cleanupLegacyPageCache();
     chrome.storage.local.get(
-        ['apiProvider', 'targetLanguage', 'geminiModel', 'openaiModel', 'anthropicModel', 'compatibleModel',
+        ['apiProvider', 'targetLanguage', 'geminiModel', 'openaiModel', 'anthropicModel', 'deepseekModel', 'compatibleModel',
          'batchSize', 'maxBatchLength', 'delayBetweenRequests', 'maxToken', 'concurrencyLimit', 'maxRetries', 'timeout', 'showContextMenu', 'autoRetranslateDomain'],
         function (items) {
             const toSet = {};
@@ -238,6 +240,7 @@ function handleExtensionInstalled(details) {
             if (!items.geminiModel) toSet.geminiModel = DEFAULTS.geminiModel;
             if (!items.openaiModel) toSet.openaiModel = DEFAULTS.openaiModel;
             if (!items.anthropicModel) toSet.anthropicModel = DEFAULTS.anthropicModel;
+            if (!items.deepseekModel) toSet.deepseekModel = DEFAULTS.deepseekModel;
             if (items.batchSize === undefined) toSet.batchSize = DEFAULTS.batchSize;
             if (items.maxBatchLength === undefined) toSet.maxBatchLength = DEFAULTS.maxBatchLength;
             if (items.delayBetweenRequests === undefined) toSet.delayBetweenRequests = DEFAULTS.delayBetweenRequests;
@@ -714,6 +717,8 @@ async function translateTextBatch(fragmentBatch, signal, streamContext = null) {
         translatedData = await translateWithOpenAI(jsonText, retryLimit, signal, langName, langCode, streamContext);
     } else if (provider === 'anthropic') {
         translatedData = await translateWithAnthropic(jsonText, retryLimit, signal, langName, langCode, streamContext);
+    } else if (provider === 'deepseek') {
+        translatedData = await translateWithDeepSeek(jsonText, retryLimit, signal, langName, langCode, streamContext);
     } else if (provider === 'openai-compatible') {
         translatedData = await translateWithOpenAICompatible(jsonText, retryLimit, signal, langName, langCode, streamContext);
     } else {
@@ -1685,6 +1690,41 @@ function buildAnthropicRequest(settings, prompt, maxOutputTokens, options) {
     };
 }
 
+function buildDeepSeekRequest(settings, prompt, maxOutputTokens, options) {
+    const actualModel = (settings.deepseekModel || '').trim() || DEFAULTS.deepseekModel;
+    const caps = resolveModelCapabilities('deepseek', actualModel);
+    const level = resolveReasoningLevel(settings.deepseekReasoning, actualModel === DEFAULTS.deepseekModel, DEFAULTS.deepseekReasoning);
+    const modelLimit = caps.maxOutputTokens ?? DEEPSEEK_MAX_OUTPUT_TOKENS;
+    const requested = explicitOutputTokens(maxOutputTokens);
+    const outputLimit = requested === null ? null : Math.min(requested, modelLimit);
+    const reasoning = buildReasoningFields(caps, level, outputLimit, options.stream);
+    const body = {
+        model: actualModel,
+        messages: [{ role: 'user', content: prompt }]
+    };
+    // Official API defaults to thinking enabled; always send an explicit toggle.
+    if (reasoning) Object.assign(body, reasoning);
+    else body.thinking = { type: 'disabled' };
+    const thinkingOn = body.thinking && body.thinking.type === 'enabled';
+    if (!thinkingOn) body.temperature = 0.2;
+    if (outputLimit !== null) body.max_tokens = outputLimit;
+    if (options.json) body.response_format = { type: 'json_object' };
+    if (options.stream) {
+        body.stream = true;
+        body.stream_options = { include_usage: true };
+    }
+    return {
+        url: 'https://api.deepseek.com/chat/completions',
+        headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${settings.deepseekApiKey}`
+        },
+        body: JSON.stringify(body),
+        reasoningSent: true,
+        reasoningLevel: thinkingOn ? level : ''
+    };
+}
+
 function postProviderRequest(request, signal, timeout) {
     return fetchJsonWithTimeout(request.url, {
         method: 'POST',
@@ -1843,6 +1883,42 @@ async function translateWithAnthropic(text, retryLimit, signal, targetLanguage =
         throwIfAnthropicRefused(data?.stop_reason, data?.stop_details);
         if (anthropicOutputTruncated(data?.stop_reason)) throw createTranslationError('maxTokensError');
         const responseText = readAnthropicTextContent(data?.content);
+        if (!responseText) throw createTranslationError('emptyResponse');
+        return parseTranslationResponse(responseText);
+    }, retryLimit, signal);
+}
+
+async function translateWithDeepSeek(text, retryLimit, signal, targetLanguage = 'English', targetLanguageCode, streamContext = null) {
+    const settings = await new Promise(resolve =>
+        chrome.storage.local.get(['deepseekApiKey', 'deepseekModel', 'deepseekReasoning', 'maxToken', 'timeout'], resolve));
+    if (!settings.deepseekApiKey) throw createTranslationError('apiKeyNotSet');
+    const actualTimeout = settings.timeout || DEFAULTS.timeout;
+    const prompt = createTranslationPrompt(text, targetLanguage, targetLanguageCode, await getPromptCustomSections());
+    const request = buildDeepSeekRequest(settings, prompt, settings.maxToken || DEFAULTS.maxToken, { json: true, stream: !!streamContext });
+    const onHttpError = (response, data) => handleOpenAIHttpError(response, data, request.reasoningSent);
+    if (streamContext) {
+        return performTranslation(async () => parseTranslationResponse(await streamModelResponse({
+            url: request.url,
+            headers: request.headers,
+            body: request.body,
+            timeout: actualTimeout,
+            reasoningLevel: request.reasoningLevel,
+            signal,
+            onHttpError,
+            readChunk: readOpenAIStreamChunk,
+            finalizeStream: finalizeOpenAIStream,
+            streamContext,
+            provider: 'deepseek'
+        })), retryLimit, signal);
+    }
+    return performTranslation(async () => {
+        const { response, data } = await postProviderRequest(request, signal, actualTimeout);
+        if (!response.ok) onHttpError(response, data);
+        recordApiUsage('deepseek', readUsageTokens(data));
+        const choice = data?.choices?.[0];
+        if (!choice) throw createTranslationError('unknownError', ' (no choices)');
+        if (choice.finish_reason === 'length') throw createTranslationError('maxTokensError');
+        const responseText = choice.message?.content || '';
         if (!responseText) throw createTranslationError('emptyResponse');
         return parseTranslationResponse(responseText);
     }, retryLimit, signal);
@@ -2122,6 +2198,7 @@ async function translateSelectionText(text, signal) {
     const prompt = createSelectionPrompt(text, langEntry ? langEntry.name : 'English');
     if (provider === 'openai') return selectionRequestOpenAI(prompt, retryLimit, signal);
     if (provider === 'anthropic') return selectionRequestAnthropic(prompt, retryLimit, signal);
+    if (provider === 'deepseek') return selectionRequestDeepSeek(prompt, retryLimit, signal);
     if (provider === 'openai-compatible') return selectionRequestCompatible(prompt, retryLimit, signal);
     return selectionRequestGemini(prompt, retryLimit, signal);
 }
@@ -2220,6 +2297,22 @@ async function selectionRequestAnthropic(prompt, retryLimit, signal) {
         recordApiUsage('anthropic', readUsageTokens(data));
         throwIfAnthropicRefused(data?.stop_reason, data?.stop_details);
         return finishSelectionText(readAnthropicTextContent(data?.content), anthropicOutputTruncated(data?.stop_reason));
+    }, retryLimit, signal);
+}
+
+async function selectionRequestDeepSeek(prompt, retryLimit, signal) {
+    const settings = await new Promise(resolve =>
+        chrome.storage.local.get(['deepseekApiKey', 'deepseekModel', 'deepseekReasoning', 'maxToken', 'timeout'], resolve));
+    if (!settings.deepseekApiKey) throw new Error(errorMessages.apiKeyNotSet);
+    const actualTimeout = settings.timeout || DEFAULTS.timeout;
+    const request = buildDeepSeekRequest(settings, prompt, selectionOutputTokenLimit(settings.maxToken), { json: false, stream: false });
+    return performTranslation(async () => {
+        const { response, data } = await postProviderRequest(request, signal, actualTimeout);
+        if (!response.ok) handleOpenAIHttpError(response, data, request.reasoningSent);
+        recordApiUsage('deepseek', readUsageTokens(data));
+        const choice = data?.choices?.[0];
+        if (!choice) throw new Error(`${errorMessages.unknownError} (no choices)`);
+        return finishSelectionText(choice.message?.content || '', choice.finish_reason === 'length');
     }, retryLimit, signal);
 }
 
